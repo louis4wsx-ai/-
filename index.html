@@ -1,0 +1,1591 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>业务财务管理系统</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- Babel (用于解析 JSX) -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <style>
+        /* 针对 iOS 的优化 */
+        body {
+            -webkit-tap-highlight-color: transparent;
+            padding-bottom: env(safe-area-inset-bottom);
+        }
+        /* 隐藏滚动条但保留功能 */
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-900 h-screen w-screen overflow-hidden">
+    <div id="root" class="h-full w-full"></div>
+
+    <script type="module">
+        // 从 ESM CDN 导入 Lucide 图标
+        import { 
+            LayoutDashboard, Wallet, Cigarette, Banknote, Plus, Search, 
+            ArrowUpRight, ArrowDownLeft, ChevronRight, ChevronDown, Calendar, 
+            Truck, User, FileText, TrendingUp, X, Save, Clock, Edit2, 
+            AlertTriangle, Users, AlertCircle, MoreHorizontal, Trash2, Package, 
+            Archive, CheckCircle, Percent, Calculator, RefreshCw, AlertOctagon, 
+            CheckSquare, Square, Filter, CreditCard, Coins, RefreshCcw, RotateCcw, 
+            Box, History, ArrowRight, Upload, Download
+        } from 'https://esm.sh/lucide-react@0.292.0?bundle';
+
+        // 将图标挂载到全局对象，以便 Babel 编译后的 React 代码能访问
+        window.Icons = {
+            LayoutDashboard, Wallet, Cigarette, Banknote, Plus, Search, 
+            ArrowUpRight, ArrowDownLeft, ChevronRight, ChevronDown, Calendar, 
+            Truck, User, FileText, TrendingUp, X, Save, Clock, Edit2, 
+            AlertTriangle, Users, AlertCircle, MoreHorizontal, Trash2, Package, 
+            Archive, CheckCircle, Percent, Calculator, RefreshCw, AlertOctagon, 
+            CheckSquare, Square, Filter, CreditCard, Coins, RefreshCcw, RotateCcw, 
+            Box, History, ArrowRight, Upload, Download
+        };
+    </script>
+
+    <script type="text/babel" data-type="module">
+        const { useState, useMemo, useEffect, useRef } = React;
+        // 解构图标
+        const { 
+            LayoutDashboard, Wallet, Cigarette, Banknote, Plus, Search, 
+            ArrowUpRight, ArrowDownLeft, ChevronRight, ChevronDown, Calendar, 
+            Truck, User, FileText, TrendingUp, X, Save, Clock, Edit2, 
+            AlertTriangle, Users, AlertCircle, MoreHorizontal, Trash2, Package, 
+            Archive, CheckCircle, Percent, Calculator, RefreshCw, AlertOctagon, 
+            CheckSquare, Square, Filter, CreditCard, Coins, RefreshCcw, RotateCcw, 
+            Box, History, ArrowRight, Upload, Download
+        } = window.Icons;
+
+        // --- 辅助函数 ---
+
+        // 获取本地日期 YYYY-MM-DD (修复时区问题)
+        const getLocalDateStr = () => {
+            const now = new Date();
+            const year = now.getFullYear();
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const day = String(now.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        };
+
+        const usePersistentState = (key, initialValue) => {
+            const [state, setState] = useState(() => {
+                try {
+                const item = window.localStorage.getItem(key);
+                return item ? JSON.parse(item) : initialValue;
+                } catch (error) {
+                console.error('LocalStorage 读取失败:', error);
+                return initialValue;
+                }
+            });
+
+            useEffect(() => {
+                try {
+                window.localStorage.setItem(key, JSON.stringify(state));
+                } catch (error) {
+                console.error('LocalStorage 写入失败:', error);
+                }
+            }, [key, state]);
+
+            return [state, setState];
+        };
+
+        const parseRate = (rateStr) => {
+            if (!rateStr) return 0;
+            if (String(rateStr).includes('分')) {
+                const fen = parseFloat(rateStr);
+                let li = 0;
+                if (rateStr.includes('厘')) {
+                    li = parseFloat(rateStr.split('分')[1]);
+                } else if (rateStr.match(/分(\d)/)) { 
+                    li = parseFloat(rateStr.match(/分(\d)/)[1]);
+                }
+                return (fen * 0.01) + (li * 0.001);
+            }
+
+            let cleanStr = String(rateStr).replace(/[^0-9.]/g, ''); 
+            let num = parseFloat(cleanStr);
+            if (isNaN(num)) return 0;
+            if (String(rateStr).includes('%')) {
+                return num / 100;
+            }
+            if (num < 1 && num > 0) return num; 
+            return num / 100; 
+        };
+
+        const formatDateShort = (dateStr) => {
+            if (!dateStr) return '';
+            const date = new Date(dateStr);
+            const yy = String(date.getFullYear()).slice(-2);
+            const mm = String(date.getMonth() + 1).padStart(2, '0');
+            const dd = String(date.getDate()).padStart(2, '0');
+            return `${yy}/${mm}/${dd}`;
+        };
+
+        const getInterestCountdown = (nextPayDateStr) => {
+            if (!nextPayDateStr) return { days: 0, isOverdue: false, text: '-' };
+            
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            
+            const targetDate = new Date(nextPayDateStr);
+            targetDate.setHours(0, 0, 0, 0);
+            
+            const diffTime = targetDate - today;
+            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+
+            if (diffDays === 0) return { days: 0, isOverdue: true, text: '今天应付', color: 'text-amber-600 font-bold' };
+            if (diffDays > 0) return { days: diffDays, isOverdue: false, text: `还有 ${diffDays} 天`, color: 'text-emerald-600' };
+            
+            return { days: Math.abs(diffDays), isOverdue: true, text: `逾期 ${Math.abs(diffDays)} 天`, color: 'text-rose-600 font-bold' };
+        };
+
+        const calculateNextPayDate = (currentBaseDateStr, anchorStartDateStr) => {
+            if (!currentBaseDateStr || !anchorStartDateStr) return currentBaseDateStr;
+
+            const baseDate = new Date(currentBaseDateStr);
+            const anchorDate = new Date(anchorStartDateStr);
+            const anchorDay = anchorDate.getDate(); 
+            
+            let targetYear = baseDate.getFullYear();
+            let targetMonth = baseDate.getMonth() + 1; 
+            
+            if (targetMonth > 11) {
+                targetYear++;
+                targetMonth = 0;
+            }
+
+            const daysInTargetMonth = new Date(targetYear, targetMonth + 1, 0).getDate();
+            const finalDay = Math.min(anchorDay, daysInTargetMonth);
+            const nextDate = new Date(targetYear, targetMonth, finalDay);
+            
+            const y = nextDate.getFullYear();
+            const m = String(nextDate.getMonth() + 1).padStart(2, '0');
+            const d = String(nextDate.getDate()).padStart(2, '0');
+            
+            return `${y}-${m}-${d}`;
+        };
+
+        const getPrincipalAtDate = (loan, checkDate) => {
+            let currentPrincipal = Number(loan.initialPrincipal);
+            if (!currentPrincipal && currentPrincipal !== 0) currentPrincipal = Number(loan.totalPrincipal);
+
+            const sortedTx = [...loan.transactions].sort((a, b) => new Date(a.date) - new Date(b.date));
+
+            for (const t of sortedTx) {
+                const tDate = new Date(t.date);
+                if (tDate > checkDate) break;
+
+                if (t.type === 'principal') {
+                currentPrincipal -= Number(t.amount);
+                } else if (t.type === 'lend') {
+                currentPrincipal += Number(t.amount);
+                }
+            }
+            return currentPrincipal;
+        };
+
+        const calculateOverdueStats = (loan) => {
+            const today = new Date();
+            today.setHours(0,0,0,0);
+            const startDate = new Date(loan.startDate);
+            startDate.setHours(0,0,0,0);
+            
+            if (today < startDate) return { overduePeriods: 0, overdueAmount: 0 };
+
+            const rate = parseRate(loan.interestRate);
+            let totalExpectedInterest = 0;
+            let billingCycles = 0; 
+
+            let cursor = new Date(startDate);
+            
+            while (cursor <= today) {
+                billingCycles++;
+                const principalAtCycle = getPrincipalAtDate(loan, cursor);
+                if (principalAtCycle > 0) {
+                    totalExpectedInterest += principalAtCycle * rate;
+                }
+                
+                const nextDateStr = calculateNextPayDate(cursor.toISOString(), loan.startDate);
+                cursor = new Date(nextDateStr);
+                cursor.setHours(0,0,0,0);
+            }
+
+            const totalPaidInterest = loan.transactions
+                .filter(t => t.type === 'interest')
+                .reduce((acc, t) => acc + Number(t.amount), 0);
+
+            const overdueAmount = totalExpectedInterest - totalPaidInterest;
+
+            let paidCycles = 0;
+            let payCursor = new Date(startDate);
+            const targetNextPay = new Date(loan.nextPayDate || loan.startDate);
+            targetNextPay.setHours(0,0,0,0);
+
+            while (payCursor < targetNextPay) {
+                paidCycles++;
+                const nextStr = calculateNextPayDate(payCursor.toISOString(), loan.startDate);
+                payCursor = new Date(nextStr);
+                payCursor.setHours(0,0,0,0);
+            }
+
+            const overduePeriods = Math.max(0, billingCycles - paidCycles);
+
+            return {
+                overduePeriods, 
+                overdueAmount,  
+                totalExpectedInterest
+            };
+        };
+
+        const calculateFinancials = (loan) => {
+            const costRate = parseRate(loan.costRate);
+            const events = [];
+            
+            events.push({ date: new Date(loan.startDate), type: 'start', amount: 0 });
+            
+            loan.transactions.forEach(t => {
+                if (t.type === 'principal' || t.type === 'lend') {
+                events.push({ date: new Date(t.date), type: t.type, amount: Number(t.amount) });
+                }
+            });
+            
+            const endDate = new Date(); 
+            events.push({ date: endDate, type: 'end', amount: 0 });
+
+            events.sort((a, b) => a.date - b.date);
+
+            let cumulativeCost = 0;
+            let currentPrincipal = Number(loan.initialPrincipal);
+            if (!currentPrincipal && currentPrincipal !== 0) currentPrincipal = Number(loan.totalPrincipal);
+
+            for (let i = 0; i < events.length - 1; i++) {
+                const start = events[i];
+                const end = events[i+1];
+                
+                const yearDiff = end.date.getFullYear() - start.date.getFullYear();
+                const monthDiff = end.date.getMonth() - start.date.getMonth();
+                const dayDiff = end.date.getDate() - start.date.getDate();
+                
+                let monthsPassed = yearDiff * 12 + monthDiff;
+                if (dayDiff > 0) monthsPassed += 1; 
+                if (monthsPassed < 0) monthsPassed = 0; 
+
+                if (monthsPassed > 0 && currentPrincipal > 0) {
+                const periodCost = currentPrincipal * costRate * monthsPassed;
+                cumulativeCost += periodCost;
+                }
+
+                if (end.type === 'principal') { 
+                currentPrincipal -= end.amount;
+                } else if (end.type === 'lend') { 
+                currentPrincipal += end.amount;
+                }
+            }
+
+            const totalInterestCollected = loan.transactions
+                .filter(t => t.type === 'interest')
+                .reduce((acc, t) => acc + Number(t.amount), 0);
+
+            return {
+                cumulativeCost,
+                totalInterestCollected,
+                netProfit: totalInterestCollected - cumulativeCost
+            };
+        };
+
+        const recalculateLoanState = (loan) => {
+            const sortedTransactions = [...loan.transactions].sort((a, b) => new Date(b.date) - new Date(a.date));
+            let currentPrincipal = Number(loan.initialPrincipal);
+            const chronologicalTransactions = [...loan.transactions].sort((a, b) => new Date(a.date) - new Date(b.date));
+            
+            chronologicalTransactions.forEach(t => {
+                if (t.type === 'lend') {
+                currentPrincipal += Number(t.amount);
+                } else if (t.type === 'principal') {
+                currentPrincipal -= Number(t.amount);
+                }
+            });
+
+            return {
+                ...loan,
+                totalPrincipal: currentPrincipal,
+                transactions: sortedTransactions
+            };
+        };
+
+        const parseCSV = (text) => {
+            const rows = [];
+            let currentRow = [];
+            let currentCell = '';
+            let inQuotes = false;
+            
+            for (let i = 0; i < text.length; i++) {
+                const char = text[i];
+                const nextChar = text[i + 1];
+                
+                if (inQuotes) {
+                    if (char === '"' && nextChar === '"') {
+                        currentCell += '"';
+                        i++; 
+                    } else if (char === '"') {
+                        inQuotes = false;
+                    } else {
+                        currentCell += char;
+                    }
+                } else {
+                    if (char === '"') {
+                        inQuotes = true;
+                    } else if (char === ',') {
+                        currentRow.push(currentCell.trim());
+                        currentCell = '';
+                    } else if (char === '\n' || char === '\r') {
+                        if (currentCell || currentRow.length > 0) {
+                            currentRow.push(currentCell.trim());
+                        }
+                        if (currentRow.length > 0) rows.push(currentRow);
+                        currentRow = [];
+                        currentCell = '';
+                        if (char === '\r' && nextChar === '\n') i++;
+                    } else {
+                        currentCell += char;
+                    }
+                }
+            }
+            if (currentCell || currentRow.length > 0) {
+                currentRow.push(currentCell.trim());
+                rows.push(currentRow);
+            }
+            
+            if (rows.length < 2) return []; 
+            
+            const headers = rows[0].map(h => h.trim().replace(/^\ufeff/, '')); 
+            const data = [];
+            
+            for (let i = 1; i < rows.length; i++) {
+                const values = rows[i];
+                if (values.length > 0) {
+                    const obj = {};
+                    headers.forEach((h, idx) => {
+                        if (h) {
+                            obj[h] = values[idx] || '';
+                        }
+                    });
+                    data.push(obj);
+                }
+            }
+            return data;
+        };
+
+        // --- 预置真实数据 (已清空，适合部署) ---
+        const initialAccounts = [];
+
+        const initialCustomerDeposits = {};
+
+        const initialDepositLogs = [];
+
+        const initialCigars = [];
+
+        const initialLoans = [];
+
+        // --- 组件 ---
+        
+        const ConfirmModal = ({ isOpen, onClose, onConfirm, title, message }) => {
+            if (!isOpen) return null;
+            return (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex justify-center items-center p-4">
+                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in duration-200">
+                        <div className="p-6 text-center">
+                            <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-amber-100 mb-4">
+                                <AlertOctagon className="h-6 w-6 text-amber-600" />
+                            </div>
+                            <h3 className="text-lg font-bold text-gray-900 mb-2">{title}</h3>
+                            <p className="text-sm text-gray-500 whitespace-pre-line">{message}</p>
+                        </div>
+                        <div className="bg-gray-50 px-6 py-4 flex gap-3">
+                            <button onClick={onClose} className="flex-1 bg-white border border-gray-300 text-gray-700 py-2 rounded-lg text-sm font-medium hover:bg-gray-50">取消</button>
+                            <button onClick={() => { onConfirm(); onClose(); }} className="flex-1 bg-indigo-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-indigo-700">确认</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const Modal = ({ isOpen, onClose, title, children }) => {
+            if (!isOpen) return null;
+            return (
+                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex justify-center items-center p-4 transition-opacity">
+                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg flex flex-col max-h-[90vh]">
+                        <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50 shrink-0">
+                            <h3 className="font-bold text-gray-800 text-lg">{title}</h3>
+                            <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1 hover:bg-gray-200 rounded-full transition-colors">
+                                <X size={20}/>
+                            </button>
+                        </div>
+                        <div className="p-6 overflow-y-auto overscroll-contain">
+                            {children}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const Card = ({ title, value, subtext, icon: Icon, colorClass, highlight, onClick }) => (
+            <div 
+                onClick={onClick}
+                className={`bg-white p-6 rounded-xl shadow-sm border ${highlight ? 'border-indigo-100 bg-indigo-50/30' : 'border-gray-100'} flex items-start justify-between ${onClick ? 'cursor-pointer hover:shadow-md transition-all group' : ''}`}
+            >
+                <div>
+                <p className="text-gray-500 text-sm font-medium mb-1">{title}</p>
+                <h3 className={`text-2xl font-bold ${colorClass || 'text-gray-800'}`}>{value}</h3>
+                {subtext && <p className="text-xs mt-2 text-gray-400">{subtext}</p>}
+                </div>
+                <div className={`p-3 rounded-lg ${colorClass ? colorClass.replace('text-', 'bg-').replace('600', '100') : 'bg-gray-100'} ${onClick ? 'group-hover:scale-110 transition-transform' : ''}`}>
+                <Icon className={`w-6 h-6 ${colorClass || 'text-gray-600'}`} />
+                </div>
+            </div>
+        );
+
+        const Badge = ({ children, type, onClick, clickable }) => {
+            const styles = {
+                success: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+                warning: 'bg-amber-100 text-amber-700 border-amber-200',
+                danger: 'bg-rose-100 text-rose-700 border-rose-200',
+                info: 'bg-blue-100 text-blue-700 border-blue-200',
+                purple: 'bg-indigo-100 text-indigo-700 border-indigo-200',
+                default: 'bg-gray-100 text-gray-700 border-gray-200',
+            };
+            return (
+                <span 
+                onClick={onClick}
+                className={`px-2.5 py-0.5 rounded-full text-xs font-medium border ${styles[type] || styles.default} ${clickable ? 'cursor-pointer hover:opacity-80 select-none' : ''}`}
+                >
+                {children}
+                </span>
+            );
+        };
+
+        // --- 主组件 ---
+
+        function WorkDashboard() {
+            const [activeTab, setActiveTab] = useState('dashboard');
+            
+            const [accounts, setAccounts] = usePersistentState('app_accounts', initialAccounts);
+            const [cigars, setCigars] = usePersistentState('app_cigars', initialCigars);
+            const [loans, setLoans] = usePersistentState('app_loans', initialLoans);
+            const [customerDeposits, setCustomerDeposits] = usePersistentState('app_deposits', initialCustomerDeposits);
+            const [customerLogs, setCustomerLogs] = usePersistentState('app_deposit_logs', initialDepositLogs);
+
+            const [showCompletedLoans, setShowCompletedLoans] = useState(false);
+
+            const [selectedCigarIds, setSelectedCigarIds] = useState([]);
+            const [showArchivedCigars, setShowArchivedCigars] = useState(false); 
+            const [cigarMonth, setCigarMonth] = useState(new Date().toISOString().slice(0, 7)); 
+            const [isBatchCigarModalOpen, setIsBatchCigarModalOpen] = useState(false); 
+            const [batchCigarForm, setBatchCigarForm] = useState({ status: '', logistics: '' }); 
+            const [isBalanceModalOpen, setIsBalanceModalOpen] = useState(false); 
+            
+            const [depositForm, setDepositForm] = useState(null); 
+            const [viewingLogCustomer, setViewingLogCustomer] = useState(null); 
+
+            const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
+            const [isCigarModalOpen, setIsCigarModalOpen] = useState(false);
+            const [isCigarStatusModalOpen, setIsCigarStatusModalOpen] = useState(false);
+            const [isLoanModalOpen, setIsLoanModalOpen] = useState(false);
+            const [activeLoanDetail, setActiveLoanDetail] = useState(null); 
+            const [activeEditItem, setActiveEditItem] = useState(null);
+
+            const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', onConfirm: () => {} });
+
+            const [editingTxId, setEditingTxId] = useState(null);
+            const [editTxForm, setEditTxForm] = useState({ date: '', type: '', amount: '', remark: '' });
+
+            const [accountForm, setAccountForm] = useState({ date: '', project: '', type: 'expense', amount: '', remark: '' });
+            const [cigarForm, setCigarForm] = useState({ 
+                date: '', 
+                customer: '', 
+                status: '待发货', 
+                logistics: '',
+                items: [{ product: '', quantity: 1, unitPrice: '' }],
+                afterSalesType: 'normal',
+                refundAmount: ''
+            });
+            const [cigarStatusForm, setCigarStatusForm] = useState({ id: '', status: '', logistics: '', afterSalesType: 'normal', refundAmount: '' });
+            
+            const [loanForm, setLoanForm] = useState({ borrower: '', guarantor: '', phone: '', totalPrincipal: '', startDate: '', nextPayDate: '', interestRate: '', costRate: '' });
+            const [repayForm, setRepayForm] = useState({ type: 'interest', amount: '', date: getLocalDateStr(), remark: '', isFullPeriodPayment: true });
+
+            const resetForms = () => {
+                const today = getLocalDateStr();
+                setAccountForm({ date: today, project: '', type: 'expense', amount: '', remark: '' });
+                setCigarForm({ 
+                date: today, 
+                customer: '', 
+                status: '待发货', 
+                logistics: '',
+                items: [{ product: '', quantity: 1, unitPrice: '' }],
+                afterSalesType: 'normal',
+                refundAmount: ''
+                });
+                setLoanForm({ borrower: '', guarantor: '', phone: '', totalPrincipal: '', startDate: today, nextPayDate: today, interestRate: '', costRate: '' });
+                setActiveEditItem(null);
+            };
+
+            const projectOptions = useMemo(() => {
+                const sorted = [...accounts].sort((a, b) => new Date(b.date) - new Date(a.date));
+                return Array.from(new Set(sorted.map(a => a.project)));
+            }, [accounts]);
+
+            const topScrollRef = useRef(null);
+            const tableScrollRef = useRef(null);
+
+            useEffect(() => {
+                const top = topScrollRef.current;
+                const table = tableScrollRef.current;
+                
+                if (top && table) {
+                const handleTopScroll = () => { table.scrollLeft = top.scrollLeft; };
+                const handleTableScroll = () => { top.scrollLeft = table.scrollLeft; };
+                
+                top.addEventListener('scroll', handleTopScroll);
+                table.addEventListener('scroll', handleTableScroll);
+                
+                return () => {
+                    top.removeEventListener('scroll', handleTopScroll);
+                    table.removeEventListener('scroll', handleTableScroll);
+                };
+                }
+            }, [activeTab, accounts]);
+
+            useEffect(() => {
+                if (topScrollRef.current && tableScrollRef.current) {
+                    const innerDiv = topScrollRef.current.firstChild;
+                    if (innerDiv) {
+                        innerDiv.style.width = `${tableScrollRef.current.scrollWidth}px`;
+                    }
+                    
+                    const resizeObserver = new ResizeObserver(() => {
+                        if (innerDiv && tableScrollRef.current) {
+                            innerDiv.style.width = `${tableScrollRef.current.scrollWidth}px`;
+                        }
+                    });
+                    resizeObserver.observe(tableScrollRef.current);
+                    return () => resizeObserver.disconnect();
+                }
+            }, [accounts, activeTab]);
+
+            const allCustomers = useMemo(() => Array.from(new Set([...Object.keys(customerDeposits), ...cigars.map(c => c.customer)])), [customerDeposits, cigars]);
+
+            const accountsWithBalance = useMemo(() => {
+                let runningBalance = 0;
+                const sorted = [...accounts].sort((a, b) => new Date(a.date) - new Date(b.date));
+                const calculated = sorted.map(item => {
+                runningBalance = runningBalance + (Number(item.income) || 0) - (Number(item.expense) || 0);
+                return { ...item, balance: runningBalance };
+                });
+                return calculated.reverse();
+            }, [accounts]);
+
+            const loanStats = useMemo(() => {
+                const activeLoans = loans.filter(l => l.status === 'active');
+                const totalPrincipal = activeLoans.reduce((acc, curr) => acc + Number(curr.totalPrincipal), 0);
+                
+                let totalNetProfit = 0;
+                loans.forEach(l => {
+                const fin = calculateFinancials(l);
+                totalNetProfit += fin.netProfit;
+                });
+
+                let overdueCount = 0;
+                let dueSoonCount = 0; 
+
+                activeLoans.forEach(loan => {
+                const overdueStats = calculateOverdueStats(loan);
+                if (overdueStats.overduePeriods > 0) overdueCount++;
+                const { days } = getInterestCountdown(loan.nextPayDate);
+                if (overdueStats.overduePeriods === 0 && days <= 7) dueSoonCount++;
+                });
+
+                return { totalPrincipal, totalNetProfit, overdueCount, dueSoonCount };
+            }, [loans]);
+
+            const dashboardStats = useMemo(() => {
+                const totalAccountBalance = accountsWithBalance.length > 0 ? accountsWithBalance[0].balance : 0; 
+                const totalCigarSales = cigars.reduce((acc, curr) => acc + curr.totalPrice, 0);
+                return { balance: totalAccountBalance, sales: totalCigarSales };
+            }, [accountsWithBalance, cigars]);
+
+            const sortedLoans = useMemo(() => {
+                let list = showCompletedLoans ? loans : loans.filter(l => l.status === 'active');
+                
+                return list.sort((a, b) => {
+                if (a.status === 'completed' && b.status !== 'completed') return 1;
+                if (a.status !== 'completed' && b.status === 'completed') return -1;
+
+                const statsA = calculateOverdueStats(a);
+                const statsB = calculateOverdueStats(b);
+                
+                if (statsA.overduePeriods !== statsB.overduePeriods) {
+                    return statsB.overduePeriods - statsA.overduePeriods;
+                }
+
+                const dateA = new Date(a.nextPayDate || a.startDate);
+                const dateB = new Date(b.nextPayDate || b.startDate);
+                return dateA - dateB;
+                });
+            }, [loans, showCompletedLoans]);
+
+            const visibleCigars = useMemo(() => {
+                const today = new Date();
+                const twoMonthsAgo = new Date(today.setMonth(today.getMonth() - 2));
+
+                let filtered = cigars.filter(item => {
+                if (showArchivedCigars) return true; 
+                if (item.status === '已交割') {
+                    const itemDate = new Date(item.date);
+                    return itemDate >= twoMonthsAgo;
+                }
+                return true;
+                });
+
+                const statusPriority = { '待发货': 0, '囤货': 1, '已发': 2, '已交割': 3, '售后': 4 };
+
+                return filtered.sort((a, b) => {
+                const pA = statusPriority[a.status] ?? 99;
+                const pB = statusPriority[b.status] ?? 99;
+                if (pA !== pB) return pA - pB;
+                const dateA = new Date(a.date);
+                const dateB = new Date(b.date);
+                return dateA - dateB; 
+                });
+            }, [cigars, showArchivedCigars]);
+
+            const cigarMonthlyStats = useMemo(() => {
+                const targetMonth = cigarMonth; // YYYY-MM
+                const monthlyOrders = cigars.filter(c => c.date.startsWith(targetMonth));
+                
+                return {
+                totalAmount: monthlyOrders.reduce((acc, c) => acc + c.totalPrice, 0),
+                count: monthlyOrders.length,
+                delivered: monthlyOrders.filter(c => c.status === '已交割').length,
+                pending: monthlyOrders.filter(c => c.status === '待发货').length
+                };
+            }, [cigars, cigarMonth]);
+
+            const getCustomerBalance = (customerName) => {
+                const deposit = customerDeposits[customerName] || 0;
+                const spent = cigars
+                .filter(c => c.customer === customerName)
+                .reduce((acc, c) => acc + c.totalPrice, 0);
+                return deposit - spent;
+            };
+
+            const uniqueCustomers = useMemo(() => {
+                const customers = new Set(Object.keys(customerDeposits));
+                cigars.forEach(c => customers.add(c.customer));
+                return Array.from(customers);
+            }, [cigars, customerDeposits]);
+
+            // --- Handlers ---
+
+            const handleExportCSV = (type) => {
+                let data = [];
+                let filename = '';
+                let headers = [];
+                let keys = [];
+                const dateStr = getLocalDateStr();
+
+                if (type === 'accounts') {
+                data = accounts;
+                filename = `账目备份_${dateStr}.csv`;
+                headers = ['日期', '项目', '支出', '收入', '备注'];
+                keys = ['date', 'project', 'expense', 'income', 'remark'];
+                } else if (type === 'cigars') {
+                data = cigars;
+                filename = `雪茄订单备份_${dateStr}.csv`;
+                headers = ['日期', '客户', '产品', '数量', '单价', '总价', '状态', '物流/备注'];
+                } else if (type === 'loans') {
+                data = loans;
+                filename = `借贷档案备份_${dateStr}.csv`;
+                headers = ['借款人', '担保人', '电话', '剩余本金', '初始本金', '起息日', '下次付息日', '利率', '资金成本', '状态'];
+                keys = ['borrower', 'guarantor', 'phone', 'totalPrincipal', 'initialPrincipal', 'startDate', 'nextPayDate', 'interestRate', 'costRate', 'status'];
+                }
+
+                const csvContent = [
+                headers.join(','),
+                ...data.map(item => {
+                    if (type === 'cigars') {
+                        return [
+                            item.date,
+                            item.customer,
+                            item.product,
+                            item.quantity,
+                            item.unitPrice,
+                            item.totalPrice,
+                            item.status,
+                            `"${(item.logistics || '').replace(/"/g, '""')}"`
+                        ].join(',');
+                    }
+                    return keys.map(key => {
+                        let val = item[key];
+                        if (val === undefined || val === null) val = '';
+                        const strVal = String(val);
+                        if (strVal.includes(',') || strVal.includes('"') || strVal.includes('\n')) {
+                            return `"${strVal.replace(/"/g, '""')}"`;
+                        }
+                        return strVal;
+                    }).join(',');
+                })
+                ].join('\n');
+
+                const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.setAttribute('download', filename);
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            };
+
+            const handleImportCSV = (e, type) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (evt) => {
+                const text = evt.target.result;
+                const data = parseCSV(text); 
+                let newCount = 0;
+                let dupCount = 0;
+
+                if (type === 'accounts') {
+                    const existingSignatures = new Set(accounts.map(a => 
+                    `${a.date}|${a.project}|${Number(a.expense)}|${Number(a.income)}|${a.remark.trim()}`
+                    ));
+
+                    const newItems = [];
+                    data.forEach((row) => {
+                    const cleanAmount = (val) => {
+                        if (!val) return 0;
+                        return Number(String(val).replace(/,/g, '')) || 0;
+                    };
+
+                    const expense = cleanAmount(row['支出金额'] || row['支出']);
+                    const income = cleanAmount(row['收入金额'] || row['收入']);
+                    const date = row['日期'] || row['Date'] || getLocalDateStr();
+                    const project = row['项目名称'] || row['项目'] || row['Project'] || '导入数据';
+                    const remark = row['备注'] || row['Remark'] || '';
+
+                    const signature = `${date}|${project}|${expense}|${income}|${remark.trim()}`;
+
+                    if (existingSignatures.has(signature)) {
+                        dupCount++;
+                    } else {
+                        newItems.push({
+                        id: Date.now() + Math.random(), 
+                        date, project, expense, income, remark
+                        });
+                        existingSignatures.add(signature); 
+                        newCount++;
+                    }
+                    });
+                    setAccounts(prev => [...prev, ...newItems]);
+                } 
+                
+                alert(`导入完成！\n成功导入: ${newCount} 条\n跳过重复: ${dupCount} 条`);
+                };
+                reader.readAsText(file);
+                e.target.value = ''; 
+            };
+            
+            const handleDeleteLoan = (loanId) => {
+                setConfirmModal({
+                isOpen: true,
+                title: '删除档案',
+                message: '确定要彻底删除该借贷档案吗？\n删除后将不可恢复。',
+                onConfirm: () => {
+                    setLoans(prev => prev.filter(l => l.id !== loanId));
+                    if (activeLoanDetail && activeLoanDetail.id === loanId) {
+                    setActiveLoanDetail(null);
+                    }
+                }
+                });
+            };
+
+            const handleArchiveLoan = () => {
+                setConfirmModal({
+                isOpen: true,
+                title: '归档结清',
+                message: '确认已全部结清本息？\n\n结清后该档案将移入归档区，不再显示在活跃列表。',
+                onConfirm: () => {
+                    const updatedLoans = loans.map(l => l.id === activeLoanDetail.id ? { ...l, status: 'completed' } : l);
+                    setLoans(updatedLoans);
+                    setActiveLoanDetail(null); 
+                }
+                });
+            };
+
+            const openAccountModal = (item = null) => {
+                if (item) { setActiveEditItem(item); setAccountForm({ ...item, type: item.income > 0 ? 'income' : 'expense', amount: item.income || item.expense }); } 
+                else { resetForms(); }
+                setIsAccountModalOpen(true);
+            };
+            
+            const handleSaveAccount = (e) => {
+                e.preventDefault();
+                const newItem = { id: activeEditItem?.id || Date.now(), ...accountForm, expense: accountForm.type === 'expense' ? Number(accountForm.amount) : 0, income: accountForm.type === 'income' ? Number(accountForm.amount) : 0 };
+                setAccounts(prev => activeEditItem ? prev.map(a => a.id === activeEditItem.id ? newItem : a) : [...prev, newItem]);
+                setIsAccountModalOpen(false);
+            };
+
+            const handleDeleteAccount = (id) => {
+                setConfirmModal({
+                isOpen: true,
+                title: '删除记录',
+                message: '确定要删除这条账目记录吗？',
+                onConfirm: () => {
+                    setAccounts(prev => prev.filter(item => item.id !== id));
+                }
+                });
+            };
+
+            const handleToggleSelectCigar = (id) => {
+                setSelectedCigarIds(prev => prev.includes(id) ? prev.filter(cid => cid !== id) : [...prev, id]);
+            };
+
+            const handleSelectAllCigars = () => {
+                const visibleIds = visibleCigars.map(c => c.id);
+                if (selectedCigarIds.length === visibleIds.length) {
+                setSelectedCigarIds([]);
+                } else {
+                setSelectedCigarIds(visibleIds);
+                }
+            };
+
+            const openBatchCigarModal = () => {
+                if (selectedCigarIds.length === 0) return;
+                setBatchCigarForm({ status: '已发', logistics: '' }); // 默认状态
+                setIsBatchCigarModalOpen(true);
+            };
+
+            const handleSaveBatchCigar = () => {
+                setCigars(prev => prev.map(c => {
+                if (selectedCigarIds.includes(c.id)) {
+                    return {
+                    ...c,
+                    status: batchCigarForm.status,
+                    logistics: batchCigarForm.logistics ? batchCigarForm.logistics : c.logistics
+                    };
+                }
+                return c;
+                }));
+                setIsBatchCigarModalOpen(false);
+                setSelectedCigarIds([]);
+            };
+
+            const openCigarModal = (item = null) => {
+                if (item) { 
+                    setActiveEditItem(item); 
+                    setCigarForm({ 
+                        ...item, 
+                        items: [{ product: item.product, quantity: item.quantity, unitPrice: item.unitPrice }],
+                        afterSalesType: 'normal',
+                        refundAmount: ''
+                    }); 
+                }
+                else { resetForms(); }
+                setIsCigarModalOpen(true);
+            };
+
+            const handleSaveCigar = (e) => {
+                e.preventDefault();
+                if (activeEditItem) {
+                let newPrice = activeEditItem.totalPrice; 
+                let newStatus = cigarForm.status;
+
+                const currentItem = cigarForm.items[0];
+                const basePrice = currentItem.quantity * currentItem.unitPrice;
+                
+                if (cigarForm.afterSalesType === 'refund_return') {
+                    newPrice = 0;
+                    newStatus = '售后';
+                } else if (cigarForm.afterSalesType === 'partial_refund') {
+                    newPrice = basePrice - (Number(cigarForm.refundAmount) || 0);
+                    newStatus = '售后';
+                } else if (cigarForm.afterSalesType === 'resend') {
+                    newPrice = basePrice;
+                    newStatus = '售后';
+                } else {
+                    newPrice = basePrice;
+                }
+
+                const updatedItem = {
+                    ...activeEditItem,
+                    date: cigarForm.date,
+                    customer: cigarForm.customer,
+                    product: currentItem.product,
+                    quantity: Number(currentItem.quantity),
+                    unitPrice: Number(currentItem.unitPrice),
+                    totalPrice: newPrice, 
+                    status: newStatus,
+                    logistics: cigarForm.logistics,
+                    afterSalesType: cigarForm.afterSalesType, 
+                    refundAmount: cigarForm.refundAmount
+                };
+
+                setCigars(prev => prev.map(c => c.id === activeEditItem.id ? updatedItem : c));
+                } else {
+                const items = cigarForm.items.map((it, idx) => ({ 
+                    id: Date.now() + idx, 
+                    date: cigarForm.date, 
+                    customer: cigarForm.customer,
+                    product: it.product,
+                    quantity: Number(it.quantity),
+                    unitPrice: Number(it.unitPrice),
+                    totalPrice: Number(it.quantity) * Number(it.unitPrice),
+                    status: cigarForm.status, 
+                    logistics: cigarForm.logistics,
+                    afterSalesType: 'normal'
+                }));
+                setCigars(prev => [...prev, ...items]);
+                }
+                setIsCigarModalOpen(false);
+            };
+
+            const handleDeleteCigar = (cigarId) => {
+                setConfirmModal({
+                    isOpen: true,
+                    title: '删除订单',
+                    message: '确定要删除这张订单卡片吗？',
+                    onConfirm: () => {
+                        setCigars(prev => prev.filter(c => c.id !== cigarId));
+                    }
+                });
+            };
+
+            const addCigarItemRow = () => setCigarForm({ ...cigarForm, items: [...cigarForm.items, { product: '', quantity: 1, unitPrice: '' }] });
+            const removeCigarItemRow = (index) => { const newItems = [...cigarForm.items]; newItems.splice(index, 1); setCigarForm({ ...cigarForm, items: newItems }); };
+            const updateCigarItemRow = (index, field, value) => { const newItems = [...cigarForm.items]; newItems[index][field] = value; setCigarForm({ ...cigarForm, items: newItems }); };
+            
+            const openCigarStatusModal = (item) => { 
+                setCigarStatusForm({ 
+                id: item.id, 
+                status: item.status, 
+                logistics: item.logistics || '', 
+                afterSalesType: item.afterSalesType || 'normal', 
+                refundAmount: item.refundAmount || '' 
+                }); 
+                setIsCigarStatusModalOpen(true); 
+            };
+
+            const handleSaveCigarStatus = () => { 
+                let newPrice = null;
+                const currentCigar = cigars.find(c => c.id === cigarStatusForm.id);
+
+                if (currentCigar) {
+                if (cigarStatusForm.status === '售后') {
+                    const basePrice = currentCigar.quantity * currentCigar.unitPrice; 
+                    
+                    if (cigarStatusForm.afterSalesType === 'refund_return') {
+                        newPrice = 0;
+                    } else if (cigarStatusForm.afterSalesType === 'partial_refund') {
+                        newPrice = basePrice - (Number(cigarStatusForm.refundAmount) || 0);
+                    } else if (cigarStatusForm.afterSalesType === 'resend') {
+                        newPrice = basePrice;
+                    }
+                } else {
+                    if (currentCigar.status === '售后') {
+                        newPrice = currentCigar.quantity * currentCigar.unitPrice;
+                    }
+                }
+                }
+
+                setCigars(prev => prev.map(c => {
+                if (c.id === cigarStatusForm.id) {
+                    const updated = { 
+                    ...c, 
+                    status: cigarStatusForm.status, 
+                    logistics: cigarStatusForm.logistics,
+                    afterSalesType: cigarStatusForm.afterSalesType,
+                    refundAmount: cigarStatusForm.refundAmount
+                    };
+                    if (newPrice !== null) updated.totalPrice = newPrice;
+                    return updated;
+                }
+                return c;
+                }));
+                setIsCigarStatusModalOpen(false); 
+            };
+
+            const handleStartDeposit = (customer) => {
+                setDepositForm({ customer, amount: '', remark: '' });
+            };
+            
+            const handleCancelDeposit = () => {
+                setDepositForm(null);
+            };
+            
+            const handleConfirmDeposit = () => {
+                if (!depositForm.amount) return;
+                const amount = Number(depositForm.amount);
+                const customer = depositForm.customer;
+                
+                setCustomerDeposits(prev => ({
+                    ...prev,
+                    [customer]: (prev[customer] || 0) + amount
+                }));
+                
+                setCustomerLogs(prev => [
+                    { 
+                    id: Date.now(), 
+                    customer, 
+                    amount, 
+                    date: getLocalDateStr(), 
+                    remark: depositForm.remark || '账户充值' 
+                    },
+                    ...prev
+                ]);
+                
+                setDepositForm(null);
+            };
+
+            const openLoanModal = (item = null) => {
+                if (item) { setActiveEditItem(item); setLoanForm({ ...item }); }
+                else { resetForms(); }
+                setIsLoanModalOpen(true);
+            };
+
+            const handleSaveLoan = (e) => {
+                e.preventDefault();
+                if (activeEditItem) {
+                setLoans(loans.map(l => l.id === activeEditItem.id ? { ...l, ...loanForm } : l));
+                } else {
+                const firstPayDate = loanForm.nextPayDate ? loanForm.nextPayDate : loanForm.startDate;
+                const newItem = {
+                    id: Date.now(),
+                    ...loanForm,
+                    initialPrincipal: Number(loanForm.totalPrincipal),
+                    totalPrincipal: Number(loanForm.totalPrincipal),
+                    nextPayDate: firstPayDate,
+                    status: 'active',
+                    transactions: [
+                    { id: Date.now() + 1, date: loanForm.startDate, type: 'lend', typeName: '放款', amount: Number(loanForm.totalPrincipal), remark: '初始放款' }
+                    ]
+                };
+                setLoans([...loans, newItem]);
+                }
+                setIsLoanModalOpen(false);
+            };
+
+            const handleAddRepayment = (e) => {
+                e.preventDefault();
+                if (!activeLoanDetail) return;
+
+                const amount = Number(repayForm.amount);
+                const newTransaction = {
+                id: Date.now(),
+                date: repayForm.date,
+                type: repayForm.type, 
+                typeName: repayForm.type === 'interest' ? '利息' : repayForm.type === 'principal' ? '本金归还' : '追加放款',
+                amount: amount,
+                remark: repayForm.remark
+                };
+
+                const updatedLoans = loans.map(l => {
+                if (l.id === activeLoanDetail.id) {
+                    const updatedTransactions = [newTransaction, ...l.transactions];
+                    let nextDate = l.nextPayDate;
+                    if (repayForm.type === 'interest' && repayForm.isFullPeriodPayment) {
+                        const baseDate = l.nextPayDate || l.startDate;
+                        nextDate = calculateNextPayDate(baseDate, l.startDate);
+                    }
+                    return recalculateLoanState({ ...l, transactions: updatedTransactions, nextPayDate: nextDate });
+                }
+                return l;
+                });
+
+                setLoans(updatedLoans);
+                setActiveLoanDetail(updatedLoans.find(l => l.id === activeLoanDetail.id));
+                setRepayForm(prev => ({ ...prev, amount: '', remark: '', isFullPeriodPayment: true })); 
+            };
+
+            const startEditTransaction = (t) => {
+                setEditingTxId(t.id);
+                setEditTxForm({ date: t.date, type: t.type, amount: t.amount, remark: t.remark });
+            };
+
+            const saveEditTransaction = () => {
+                if (!activeLoanDetail) return;
+                const updatedLoans = loans.map(l => {
+                if (l.id === activeLoanDetail.id) {
+                    const updatedTransactions = l.transactions.map(t => {
+                    if (t.id === editingTxId) {
+                        return {
+                        ...t,
+                        date: editTxForm.date,
+                        type: editTxForm.type,
+                        typeName: editTxForm.type === 'interest' ? '利息' : editTxForm.type === 'principal' ? '本金归还' : '追加放款',
+                        amount: Number(editTxForm.amount),
+                        remark: editTxForm.remark
+                        };
+                    }
+                    return t;
+                    });
+                    return recalculateLoanState({ ...l, transactions: updatedTransactions });
+                }
+                return l;
+                });
+                setLoans(updatedLoans);
+                setActiveLoanDetail(updatedLoans.find(l => l.id === activeLoanDetail.id));
+                setEditingTxId(null);
+            };
+
+            const deleteTransaction = (txId) => {
+                setConfirmModal({
+                isOpen: true,
+                title: '删除记录',
+                message: '确认删除这条流水？\n本金余额将自动重新计算。',
+                onConfirm: () => {
+                    const updatedLoans = loans.map(l => {
+                    if (l.id === activeLoanDetail.id) {
+                        const updatedTransactions = l.transactions.filter(t => t.id !== txId);
+                        return recalculateLoanState({ ...l, transactions: updatedTransactions });
+                    }
+                    return l;
+                    });
+                    setLoans(updatedLoans);
+                    setActiveLoanDetail(updatedLoans.find(l => l.id === activeLoanDetail.id));
+                }
+                });
+            };
+
+            // --- Render Functions ---
+
+            const renderDashboard = () => {
+                const criticalList = loans
+                .filter(l => l.status === 'active')
+                .map(loan => {
+                    const countdown = getInterestCountdown(loan.nextPayDate);
+                    const overdueStats = calculateOverdueStats(loan);
+                    const monthlyInterest = loan.totalPrincipal * parseRate(loan.interestRate);
+                    
+                    let type = null;
+                    let displayAmount = 0;
+
+                    if (countdown.isOverdue) {
+                    type = 'overdue';
+                    displayAmount = overdueStats.overdueAmount > 0 ? overdueStats.overdueAmount : monthlyInterest;
+                    } else if (countdown.days <= 7) {
+                    type = 'upcoming';
+                    displayAmount = monthlyInterest;
+                    }
+
+                    return { loan, type, countdown, displayAmount };
+                })
+                .filter(item => item.type !== null)
+                .sort((a, b) => {
+                    if (a.type === 'overdue' && b.type !== 'upcoming') return -1;
+                    if (a.type === 'upcoming' && b.type === 'overdue') return 1;
+                    if (a.type === 'overdue') {
+                    return b.countdown.days - a.countdown.days;
+                    } else {
+                    return a.countdown.days - b.countdown.days;
+                    }
+                });
+
+                const todayStr = new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
+
+                return (
+                <div className="space-y-6 pb-20">
+                    <div className="flex justify-between items-end">
+                    <p className="text-gray-500 text-sm">以下是您所有业务模块的实时概览</p>
+                    <p className="text-gray-400 text-sm font-medium bg-gray-100 px-3 py-1 rounded-full text-xs">{todayStr}</p>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <Card onClick={() => setActiveTab('accounts')} title="账目资金池" value={`¥${dashboardStats.balance.toLocaleString()}`} subtext="当前流动余额" icon={Wallet} colorClass="text-emerald-600"/>
+                    <Card onClick={() => setActiveTab('loans')} title="利息业务 - 当月" value={`${loanStats.dueSoonCount} 人临期`} subtext={`${loanStats.overdueCount} 人逾期 | 共 ${loans.filter(l => l.status === 'active').length} 笔未结清`} icon={Banknote} colorClass="text-blue-600" highlight={loanStats.overdueCount > 0}/>
+                    <Card onClick={() => setActiveTab('cigars')} title="雪茄待处理" value={cigars.filter(c => c.status !== '已交割').length} subtext="待发货 / 运输中" icon={Truck} colorClass="text-amber-600"/>
+                    </div>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div onClick={() => setActiveTab('cigars')} className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 cursor-pointer hover:shadow-md transition-all group">
+                        <div className="flex justify-between items-center mb-4"><h3 className="text-lg font-bold text-gray-800 flex items-center group-hover:text-amber-600 transition-colors"><Package className="w-5 h-5 mr-2 text-amber-600" />最新雪茄订单</h3><span className="text-xs text-amber-600 hover:underline">查看全部</span></div>
+                        <div className="space-y-3">{cigars.slice(-5).reverse().map(item => (<div key={item.id} className="flex justify-between items-center p-3 hover:bg-gray-50 rounded-lg transition-colors border border-gray-50"><div><p className="font-medium text-gray-800 text-sm">{item.product}</p><p className="text-xs text-gray-500">{item.customer} | {item.date}</p></div><Badge type={item.status === '已交割' ? 'success' : item.status === '待发货' ? 'warning' : 'info'}>{item.status}</Badge></div>))}</div>
+                    </div>
+                    <div onClick={() => setActiveTab('loans')} className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 cursor-pointer hover:shadow-md transition-all group">
+                        <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center group-hover:text-blue-600 transition-colors"><AlertCircle className="w-5 h-5 mr-2 text-rose-500" />利息逾期/临期 (未结清)</h3>
+                        <div className="space-y-3">
+                        {criticalList.length === 0 ? (
+                            <p className="text-gray-400 text-sm text-center py-4">暂无临期或逾期记录</p>
+                        ) : (
+                            criticalList.map((item) => (
+                            <div key={item.loan.id} className={`flex justify-between items-center p-3 rounded-lg border ${item.type === 'overdue' ? 'bg-rose-50 border-rose-100' : 'bg-amber-50 border-amber-100'}`}>
+                                <div>
+                                <p className="font-bold text-gray-800">{item.loan.borrower}</p>
+                                <p className="text-xs text-gray-500">本金: ¥{Number(item.loan.totalPrincipal).toLocaleString()}</p>
+                                </div>
+                                <div className="text-right">
+                                <span className={`block font-bold ${item.type === 'overdue' ? 'text-rose-600' : 'text-amber-600'}`}>
+                                    ¥{item.displayAmount.toLocaleString()}
+                                </span>
+                                <span className={`text-xs ${item.type === 'overdue' ? 'text-rose-500' : 'text-amber-500'}`}>
+                                    {item.countdown.text}
+                                </span>
+                                </div>
+                            </div>
+                            ))
+                        )}
+                        </div>
+                    </div>
+                    </div>
+                </div>
+                );
+            };
+
+            const renderAccounts = () => (
+                <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col h-full pb-20">
+                    <div className="p-4 md:p-6 border-b border-gray-100 flex flex-col md:flex-row justify-between items-start md:items-center bg-gray-50 flex-shrink-0 gap-4">
+                        <div><h2 className="text-xl font-bold text-gray-800">账目管理</h2><p className="text-sm text-gray-500 mt-1">资金进出明细</p></div>
+                        <div className="flex gap-2 w-full md:w-auto overflow-x-auto no-scrollbar">
+                            <label className="bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-lg text-sm font-medium cursor-pointer hover:bg-gray-50 flex items-center shrink-0">
+                                <Upload size={16} className="mr-2"/> 导入CSV
+                                <input type="file" accept=".csv" className="hidden" onChange={(e) => handleImportCSV(e, 'accounts')} />
+                            </label>
+                            <button onClick={() => handleExportCSV('accounts')} className="bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 flex items-center shrink-0"><Download size={16} className="mr-2"/> 备份</button>
+                            <button onClick={() => openAccountModal()} className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg flex items-center text-sm font-medium shrink-0"><Plus className="w-4 h-4 mr-2" /> 新增账目</button>
+                        </div>
+                    </div>
+                
+                    <div ref={tableScrollRef} className="flex-1 overflow-auto relative">
+                        <div ref={topScrollRef} className="overflow-x-auto h-0 w-full absolute top-0 z-50 pointer-events-none">
+                            <div className="h-1"></div>
+                        </div>
+
+                        <table className="w-full text-left text-sm relative border-collapse min-w-[800px]">
+                            <thead className="bg-gray-100 text-gray-600 font-medium sticky top-0 z-20 shadow-sm">
+                                <tr>
+                                <th className="p-4 whitespace-nowrap bg-gray-100 w-32"><div className="flex items-center gap-2">日期</div></th>
+                                <th className="p-4 whitespace-nowrap bg-gray-100">项目</th>
+                                <th className="p-4 text-right whitespace-nowrap bg-gray-100">支出</th>
+                                <th className="p-4 text-right whitespace-nowrap bg-gray-100">收入</th>
+                                <th className="p-4 text-right whitespace-nowrap bg-gray-100">余额</th>
+                                <th className="p-4 whitespace-nowrap bg-gray-100">备注</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100">
+                                {accountsWithBalance.map((item) => (
+                                <tr 
+                                    key={item.id} 
+                                    onClick={() => openAccountModal(item)} 
+                                    className="hover:bg-gray-50 transition-colors group cursor-pointer"
+                                >
+                                    <td className="p-4 text-gray-600 font-mono whitespace-nowrap">
+                                    <div className="flex items-center gap-2">
+                                        {formatDateShort(item.date)}
+                                        <button 
+                                        onClick={(e) => { e.stopPropagation(); handleDeleteAccount(item.id); }} 
+                                        className="text-gray-300 hover:text-rose-500 p-1 rounded-full hover:bg-rose-50 transition-colors"
+                                        >
+                                        <Trash2 size={14}/>
+                                        </button>
+                                    </div>
+                                    </td>
+                                    <td className="p-4 font-medium text-gray-800 whitespace-nowrap">{item.project}</td>
+                                    <td className="p-4 text-right text-rose-600 font-medium whitespace-nowrap">{item.expense > 0 ? item.expense.toLocaleString() : '-'}</td>
+                                    <td className="p-4 text-right text-emerald-600 font-medium whitespace-nowrap">{item.income > 0 ? item.income.toLocaleString() : '-'}</td>
+                                    <td className="p-4 text-right font-bold text-gray-800 whitespace-nowrap">{item.balance.toLocaleString()}</td>
+                                    <td className="p-4 text-gray-500 text-xs max-w-xs truncate" title={item.remark}>{item.remark}</td>
+                                </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            );
+
+            const renderCigars = () => {
+                const cigarStats = cigars.reduce((acc, curr) => {
+                    const val = curr.totalPrice || 0;
+                    if (curr.status === '已交割' || curr.status === '售后') acc.delivered += val;
+                    else if (curr.status === '囤货') acc.stock += val;
+                    else if (curr.status === '待发货') acc.pending += val;
+                    else if (curr.status === '已发') acc.shipped += val;
+                    return acc;
+                }, { delivered: 0, stock: 0, pending: 0, shipped: 0 });
+
+                const isAllSelected = visibleCigars.length > 0 && selectedCigarIds.length === visibleCigars.length;
+
+                return (
+                <div className="space-y-6 relative pb-24">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div className="bg-white rounded-xl p-4 border border-emerald-100 shadow-sm"><p className="text-emerald-600 text-xs font-bold uppercase mb-1">已交割总额</p><h3 className="text-xl md:text-2xl font-bold text-gray-800">¥{cigarStats.delivered.toLocaleString()}</h3></div>
+                        <div className="bg-white rounded-xl p-4 border border-indigo-100 shadow-sm"><p className="text-indigo-600 text-xs font-bold uppercase mb-1">囤货总值</p><h3 className="text-xl md:text-2xl font-bold text-gray-800">¥{cigarStats.stock.toLocaleString()}</h3></div>
+                        <div className="bg-white rounded-xl p-4 border border-amber-100 shadow-sm"><p className="text-amber-600 text-xs font-bold uppercase mb-1">待发货金额</p><h3 className="text-xl md:text-2xl font-bold text-gray-800">¥{cigarStats.pending.toLocaleString()}</h3></div>
+                        <div className="bg-white rounded-xl p-4 border border-blue-100 shadow-sm"><p className="text-blue-600 text-xs font-bold uppercase mb-1">运输中金额</p><h3 className="text-xl md:text-2xl font-bold text-gray-800">¥{cigarStats.shipped.toLocaleString()}</h3></div>
+                    </div>
+
+                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-3 rounded-xl border border-gray-100 shadow-sm gap-3">
+                        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar w-full md:w-auto">
+                            <button onClick={() => setIsBalanceModalOpen(true)} className="flex items-center text-gray-600 hover:text-indigo-600 text-sm font-medium transition-colors bg-gray-50 px-3 py-2 rounded-lg hover:bg-indigo-50 shrink-0"><CreditCard size={16} className="mr-2"/> 管理客户余额</button>
+                            <div className="flex items-center gap-2">
+                                <label className="flex items-center text-gray-600 hover:text-indigo-600 text-sm font-medium transition-colors bg-gray-50 px-3 py-2 rounded-lg hover:bg-indigo-50 cursor-pointer shrink-0"><Upload size={16} className="mr-2"/> 导入<input type="file" accept=".csv" className="hidden" onChange={(e) => handleImportCSV(e, 'cigars')} /></label>
+                                <button onClick={() => handleExportCSV('cigars')} className="flex items-center text-gray-600 hover:text-indigo-600 text-sm font-medium transition-colors bg-gray-50 px-3 py-2 rounded-lg hover:bg-indigo-50 shrink-0"><Download size={16} className="mr-2"/> 备份</button>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-4 w-full md:w-auto justify-between md:justify-end">
+                            <div onClick={handleSelectAllCigars} className="flex items-center cursor-pointer text-gray-500 hover:text-gray-800 text-sm select-none">{isAllSelected ? <CheckSquare className="mr-2 text-amber-500" size={18}/> : <Square className="mr-2" size={18}/>} 全选</div>
+                            <button onClick={() => openCigarModal()} className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-lg flex items-center transition-all text-sm shadow-sm font-bold"><Plus className="w-4 h-4 mr-2" /> 新增订单</button>
+                        </div>
+                    </div>
+
+                    <div className="bg-white p-4 rounded-xl border border-gray-100 flex justify-between items-center shadow-sm">
+                        <div className="flex items-center gap-4">
+                            <div className="bg-amber-50 p-2 rounded-lg"><Calendar className="text-amber-600" size={20}/></div>
+                            <div><p className="text-xs text-gray-500 uppercase font-bold">月度账单统计</p><div className="flex items-baseline gap-2"><span className="font-bold text-gray-800 text-lg">¥{cigarMonthlyStats.totalAmount.toLocaleString()}</span><span className="text-xs text-gray-400">共 {cigarMonthlyStats.count} 单</span></div></div>
+                        </div>
+                        <div className="flex items-center gap-4"><input type="month" value={cigarMonth} onChange={(e) => setCigarMonth(e.target.value)} className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm outline-none focus:border-amber-500"/><div className="text-right text-xs text-gray-500 hidden md:block"><div>已交割: {cigarMonthlyStats.delivered}</div><div>待发货: {cigarMonthlyStats.pending}</div></div></div>
+                    </div>
+
+                    <div className="flex justify-end">
+                        <div className="flex items-center gap-2 cursor-pointer" onClick={() => setShowArchivedCigars(!showArchivedCigars)}>
+                            <span className={`text-xs ${showArchivedCigars ? 'text-amber-600 font-bold' : 'text-gray-400'}`}>显示超过2个月的历史订单</span>
+                            <div className={`w-8 h-4 rounded-full transition-colors relative ${showArchivedCigars ? 'bg-amber-500' : 'bg-gray-300'}`}><div className={`w-2 h-2 bg-white rounded-full absolute top-1 transition-all ${showArchivedCigars ? 'left-5' : 'left-1'}`}></div></div>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {visibleCigars.map((item) => {
+                            const isSelected = selectedCigarIds.includes(item.id);
+                            const balance = getCustomerBalance(item.customer);
+                            return (
+                            <div key={item.id} className={`bg-white rounded-xl shadow-sm border ${isSelected ? 'border-amber-400 ring-2 ring-amber-100' : 'border-gray-100'} p-5 relative overflow-hidden group hover:shadow-md transition-all cursor-pointer`} onClick={() => handleToggleSelectCigar(item.id)}>
+                                <div className="absolute top-4 left-4 z-10 text-gray-300">{isSelected ? <CheckSquare className="text-amber-500" size={24}/> : <Square size={24}/>}</div>
+                                <div className="absolute top-2 right-2 z-20"><button onClick={(e) => { e.stopPropagation(); handleDeleteCigar(item.id); }} className="p-1.5 text-gray-300 hover:text-rose-500 rounded-full hover:bg-rose-50 transition-colors"><Trash2 size={16}/></button></div>
+                                <div className={`absolute top-0 left-0 w-1.5 h-full ${item.status === '已交割' ? 'bg-emerald-500' : item.status === '待发货' ? 'bg-amber-500' : item.status === '已发' ? 'bg-blue-500' : item.status === '囤货' ? 'bg-indigo-500' : 'bg-rose-500'}`}></div>
+                                <div className="mb-3 pl-8">
+                                    <div className="flex justify-between items-start mb-2"><h3 className="font-bold text-lg text-gray-900 leading-tight w-1/2">{item.product}</h3><div className="flex items-center justify-end text-gray-800 font-bold text-lg w-1/2"><User size={18} className="mr-1.5 text-gray-400"/> {item.customer}</div></div>
+                                    <div className="flex justify-between items-center mb-3 pb-3 border-b border-gray-100"><div className="text-sm text-gray-500">数量: <span className="font-bold text-gray-800">{item.quantity}</span></div><div className="text-base font-bold text-gray-700">¥{item.totalPrice.toLocaleString()}</div></div>
+                                    <div className="bg-gray-50 rounded border border-gray-100 p-2.5 mb-3 text-sm min-h-[50px] flex items-center">{item.logistics ? <div className="flex items-start w-full"><Truck size={14} className="mr-2 mt-0.5 text-amber-500 flex-shrink-0"/> <span className="text-gray-700 leading-snug break-all">{item.logistics}</span></div> : <span className="text-gray-400 italic w-full text-center text-xs">暂无物流信息</span>}</div>
+                                    <div className="flex justify-between items-end"><div className="flex flex-col gap-1"><p className="text-xs text-gray-400 font-mono">{item.date}</p><div className={`text-xs font-medium px-1.5 py-0.5 rounded w-fit ${balance >= 0 ? 'bg-blue-50 text-blue-600' : 'bg-rose-50 text-rose-600'}`}>余: ¥{balance.toLocaleString()}</div></div><div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}><Badge clickable onClick={() => openCigarStatusModal(item)} type={item.status === '已交割' ? 'success' : item.status === '待发货' ? 'warning' : item.status === '售后' ? 'danger' : item.status === '囤货' ? 'purple' : 'info'}>{item.status}</Badge><button onClick={() => openCigarModal(item)} className="p-1.5 hover:bg-gray-100 rounded text-gray-400 hover:text-indigo-600"><Edit2 size={16}/></button></div></div>
+                                </div>
+                            </div>
+                        )})}
+                    </div>
+
+                    {selectedCigarIds.length > 0 && (
+                        <div className="fixed bottom-24 md:bottom-6 left-1/2 transform -translate-x-1/2 bg-white border border-gray-200 text-gray-800 px-6 py-4 rounded-xl shadow-2xl flex items-center space-x-6 z-50 animate-in slide-in-from-bottom-10 fade-in duration-300 min-w-[300px]">
+                            <div className="flex items-center"><div className="bg-amber-100 text-amber-700 font-bold px-2 py-1 rounded text-xs mr-2">{selectedCigarIds.length}</div><span className="font-bold text-sm">项已选</span></div>
+                            <div className="h-8 w-px bg-gray-200"></div>
+                            <div className="flex space-x-2"><button onClick={openBatchCigarModal} className="bg-gray-900 hover:bg-black text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-lg flex items-center"><Edit2 size={14} className="mr-2"/> 批量修改</button></div>
+                            <button onClick={() => setSelectedCigarIds([])} className="ml-auto text-gray-400 hover:text-gray-600 p-1 rounded-full"><X size={18}/></button>
+                        </div>
+                    )}
+                </div>
+                );
+            };
+
+            const renderBalanceModal = () => (
+                <Modal isOpen={isBalanceModalOpen} onClose={() => { setIsBalanceModalOpen(false); setDepositForm(null); setViewingLogCustomer(null); }} title="客户余额管理">
+                    <div className="space-y-4">
+                        <div className="bg-blue-50 p-3 rounded-lg text-sm text-blue-700"><p className="font-bold mb-1">说明：</p><ul className="list-disc list-inside space-y-1 text-xs"><li>此处设置客户的<strong>初始预存总额</strong>。</li><li>系统会自动扣除该客户所有订单金额，计算出“当前可用余额”。</li></ul></div>
+                        <div className="max-h-[50vh] overflow-y-auto space-y-3">
+                            {uniqueCustomers.map(customer => {
+                                const deposit = customerDeposits[customer] || 0;
+                                const spent = cigars.filter(c => c.customer === customer).reduce((acc, c) => acc + c.totalPrice, 0);
+                                const balance = deposit - spent;
+                                const isDepositing = depositForm && depositForm.customer === customer;
+                                const isViewingLogs = viewingLogCustomer === customer;
+                                const logs = customerLogs.filter(log => log.customer === customer);
+
+                                return (
+                                    <div key={customer} className="border border-gray-100 rounded-lg hover:bg-gray-50 transition-colors">
+                                        <div className="flex items-center justify-between p-3">
+                                            <div><div className="font-bold text-gray-800">{customer}</div><div className="text-xs text-gray-500 mt-1">已消费: ¥{spent.toLocaleString()}</div></div>
+                                            <div className="text-right"><div className="text-xs text-gray-400 mb-1">总预存: ¥{deposit.toLocaleString()}</div><div className={`text-sm font-bold ${balance >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>余: ¥{balance.toLocaleString()}</div></div>
+                                        </div>
+                                        <div className="px-3 pb-3 flex gap-2 justify-end"><button onClick={() => setViewingLogCustomer(prev => prev === customer ? null : customer)} className="text-xs text-blue-600 hover:underline flex items-center"><History size={12} className="mr-1"/> {isViewingLogs ? '收起记录' : '查看记录'}</button><button onClick={() => handleStartDeposit(customer)} className="text-xs bg-indigo-50 text-indigo-600 px-2 py-1 rounded hover:bg-indigo-100 flex items-center"><Plus size={12} className="mr-1"/> 充值/调整</button></div>
+                                        {isDepositing && (<div className="px-3 pb-3 bg-indigo-50/50 pt-2 border-t border-indigo-100 animate-in slide-in-from-top-2"><div className="flex gap-2 mb-2"><input type="number" placeholder="金额 (+充值/-扣除)" value={depositForm.amount} onChange={e => setDepositForm({...depositForm, amount: e.target.value})} className="w-1/2 border rounded px-2 py-1 text-sm"/><input type="text" placeholder="备注 (如: 微信转账)" value={depositForm.remark} onChange={e => setDepositForm({...depositForm, remark: e.target.value})} className="w-1/2 border rounded px-2 py-1 text-sm"/></div><div className="flex gap-2"><button onClick={handleConfirmDeposit} className="flex-1 bg-indigo-600 text-white text-xs py-1 rounded">确认提交</button><button onClick={handleCancelDeposit} className="flex-1 bg-gray-300 text-gray-700 text-xs py-1 rounded">取消</button></div></div>)}
+                                        {isViewingLogs && (<div className="px-3 pb-3 bg-gray-50 border-t border-gray-100"><ul className="space-y-2 text-xs">{logs.length > 0 ? logs.map(log => (<li key={log.id} className="flex justify-between text-gray-600 border-b border-gray-200 pb-1 last:border-0"><span>{log.date} <span className="text-gray-400">|</span> {log.remark}</span><span className={log.amount >= 0 ? 'text-emerald-600 font-bold' : 'text-rose-600 font-bold'}>{log.amount > 0 ? '+' : ''}{log.amount.toLocaleString()}</span></li>)) : <li className="text-gray-400 text-center">暂无记录</li>}</ul></div>)}
+                                    </div>
+                                );
+                            })}
+                            {uniqueCustomers.length === 0 && <p className="text-center text-gray-400 py-4">暂无客户记录</p>}
+                        </div>
+                        <button onClick={() => setIsBalanceModalOpen(false)} className="w-full bg-gray-900 text-white py-2 rounded-lg">关闭</button>
+                    </div>
+                </Modal>
+            );
+
+            const renderLoans = () => (
+                <div className="space-y-6 pb-20">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 bg-blue-900 rounded-xl p-6 text-white shadow-lg">
+                        <div><p className="text-blue-200 text-xs font-bold uppercase mb-1">在外本金总额</p><h3 className="text-2xl md:text-3xl font-bold">¥{loanStats.totalPrincipal.toLocaleString()}</h3></div>
+                        <div><p className="text-blue-200 text-xs font-bold uppercase mb-1">累计净利润</p><h3 className={`text-2xl md:text-3xl font-bold ${loanStats.totalNetProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>¥{Math.round(loanStats.totalNetProfit).toLocaleString()}</h3></div>
+                        <div><p className="text-blue-200 text-xs font-bold uppercase mb-1">当前逾期人数</p><h3 className="text-2xl md:text-3xl font-bold text-rose-400">{loanStats.overdueCount} <span className="text-sm font-normal text-blue-200">人</span></h3></div>
+                        <div className="flex flex-col justify-between items-start md:items-end">
+                            <div className="flex gap-2">
+                                <label className="bg-white/10 hover:bg-white/20 border border-white/20 text-white px-3 py-1.5 rounded-lg flex items-center transition-all mb-2 text-xs cursor-pointer"><Upload size={14} className="mr-2"/> 导入<input type="file" accept=".csv" className="hidden" onChange={(e) => handleImportCSV(e, 'loans')} /></label>
+                                <button onClick={() => handleExportCSV('loans')} className="bg-white/10 hover:bg-white/20 border border-white/20 text-white px-3 py-1.5 rounded-lg flex items-center transition-all mb-2 text-xs"><Download size={14} className="mr-2"/> 备份</button>
+                            </div>
+                            <button onClick={() => openLoanModal()} className="bg-white/10 hover:bg-white/20 border border-white/20 text-white px-4 py-2 rounded-lg flex items-center transition-all mb-2 text-sm w-full md:w-auto justify-center"><Plus className="w-4 h-4 mr-2" /> 新增借贷</button><div className="flex items-center text-xs text-blue-200"><input type="checkbox" id="showCompleted" checked={showCompletedLoans} onChange={e => setShowCompletedLoans(e.target.checked)} className="mr-2 rounded border-blue-400" /><label htmlFor="showCompleted" className="cursor-pointer select-none">显示已结清</label></div></div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {sortedLoans.map(loan => {
+                        const isCompleted = loan.status === 'completed';
+                        const financials = calculateFinancials(loan);
+                        const overdueStats = calculateOverdueStats(loan);
+                        
+                        return (
+                            <div key={loan.id} className={`bg-white rounded-xl shadow-sm border ${isCompleted ? 'border-gray-200 opacity-70' : overdueStats.overduePeriods > 0 ? 'border-rose-200' : 'border-gray-100'} p-6 relative overflow-hidden group hover:shadow-md transition-all`}>
+                            <div className={`absolute top-0 left-0 w-1 h-full ${isCompleted ? 'bg-gray-400' : overdueStats.overduePeriods > 0 ? 'bg-rose-500' : 'bg-blue-500'}`}></div>
+                            {isCompleted && <div className="absolute top-2 right-2 flex gap-1 z-10"><button onClick={(e) => { e.stopPropagation(); handleDeleteLoan(loan.id); }} className="text-gray-400 hover:text-rose-500 p-1 rounded-full"><Trash2 size={16}/></button><span className="bg-gray-100 text-gray-500 text-xs px-2 py-1 rounded-full font-bold flex items-center">已结清</span></div>}
+                            
+                            <div className="flex justify-between items-start mb-2">
+                                <div><h3 className="text-lg font-bold text-gray-800 flex items-center">{loan.borrower}<span className="ml-2 text-xs font-normal text-gray-400 px-2 py-0.5 bg-gray-100 rounded">{loan.interestRate}</span></h3>{loan.guarantor && <p className="text-xs text-gray-500 mt-1">担保人: <span className="font-medium text-gray-700">{loan.guarantor}</span></p>}</div>
+                                {!isCompleted && <div className="flex gap-2 relative z-10"><button onClick={(e) => { e.stopPropagation(); handleDeleteLoan(loan.id); }} className="p-1.5 hover:bg-rose-50 rounded text-gray-400 hover:text-rose-600 transition-colors"><Trash2 size={16}/></button><button onClick={() => openLoanModal(loan)} className="p-1.5 hover:bg-gray-100 rounded text-gray-400 hover:text-indigo-600 transition-colors"><Edit2 size={16}/></button></div>}
+                            </div>
+                            
+                            <div className="bg-gray-50 rounded-lg p-3 mb-4 space-y-2">
+                                <div className="flex justify-between items-center text-sm"><span className="text-gray-500">剩余本金</span><span className={`font-bold text-lg ${isCompleted ? 'text-gray-400 strike-through' : 'text-gray-800'}`}>¥{Number(loan.totalPrincipal).toLocaleString()}</span></div>
+                                {!isCompleted && overdueStats.overduePeriods > 0 && (<div className="bg-rose-50 border border-rose-100 p-2 rounded mt-2"><div className="flex justify-between text-rose-700 text-xs font-bold mb-1"><span>逾期期数</span><span>{overdueStats.overduePeriods} 期</span></div><div className="flex justify-between text-rose-600 text-xs"><span>欠付利息</span><span>¥{overdueStats.overdueAmount.toLocaleString()}</span></div></div>)}
+                                {!isCompleted && overdueStats.overduePeriods === 0 && (<div className="flex justify-between items-center text-sm pt-2 border-t border-gray-200"><span className="text-gray-500">下次付息</span><span className="font-bold text-emerald-600 flex items-center">{loan.nextPayDate}</span></div>)}
+                            </div>
+                            <div className="space-y-1 mb-4 text-xs">
+                                <div className="flex justify-between items-center bg-gray-50 px-2 py-1.5 rounded"><span className="text-gray-500">已收利息</span><span className="font-medium text-gray-700">¥{financials.totalInterestCollected.toLocaleString()}</span></div>
+                                <div className="flex justify-between items-center bg-indigo-50 px-2 py-1.5 rounded"><span className="text-indigo-600">资金成本 ({loan.costRate || '0%'})</span><span className="font-medium text-indigo-700">- ¥{Math.round(financials.cumulativeCost).toLocaleString()}</span></div>
+                                <div className="flex justify-between items-center px-2 py-1.5 border-t border-gray-100 mt-1"><span className="font-bold text-gray-600">净收益</span><span className={`font-bold ${financials.netProfit >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>¥{Math.round(financials.netProfit).toLocaleString()}</span></div>
+                            </div>
+                            <button onClick={() => setActiveLoanDetail(loan)} className="w-full bg-white border border-gray-200 hover:bg-blue-50 hover:border-blue-200 hover:text-blue-700 text-gray-600 py-2.5 rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-2"><FileText size={16}/> 查看详情 / 资金操作</button>
+                            </div>
+                        );
+                        })}
+                    </div>
+                </div>
+            );
+
+            return (
+                <div className="min-h-screen bg-gray-50 flex font-sans text-gray-900 overflow-hidden flex-col md:flex-row">
+                    <ConfirmModal isOpen={confirmModal.isOpen} onClose={() => setConfirmModal({ ...confirmModal, isOpen: false })} onConfirm={confirmModal.onConfirm} title={confirmModal.title} message={confirmModal.message}/>
+                    {renderBalanceModal()}
+                    
+                    <Modal isOpen={isAccountModalOpen} onClose={() => setIsAccountModalOpen(false)} title={activeEditItem ? "编辑账目" : "新增账目"}>
+                        <form onSubmit={handleSaveAccount} className="space-y-4">
+                        <div><label className="block text-sm font-medium text-gray-700">日期</label><input type="date" required value={accountForm.date} onChange={e => setAccountForm({...accountForm, date: e.target.value})} className="w-full p-2 border rounded-lg"/></div>
+                        <div><label className="block text-sm font-medium text-gray-700">项目</label><input type="text" list="project-list" required value={accountForm.project} onChange={e => setAccountForm({...accountForm, project: e.target.value})} className="w-full p-2 border rounded-lg" autoComplete="off"/><datalist id="project-list">{projectOptions.map(p => <option key={p} value={p} />)}</datalist></div>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div><label className="block text-sm font-medium text-gray-700">类型</label><select value={accountForm.type} onChange={e => setAccountForm({...accountForm, type: e.target.value})} className="w-full p-2 border rounded-lg"><option value="expense">支出</option><option value="income">收入</option></select></div>
+                            <div><label className="block text-sm font-medium text-gray-700">金额</label><input type="number" required value={accountForm.amount} onChange={e => setAccountForm({...accountForm, amount: e.target.value})} className="w-full p-2 border rounded-lg"/></div>
+                        </div>
+                        <div><label className="block text-sm font-medium text-gray-700">备注 (选填)</label><textarea value={accountForm.remark} onChange={e => setAccountForm({...accountForm, remark: e.target.value})} className="w-full p-2 border rounded-lg h-20" placeholder="填写凭证号或详细说明..."/></div>
+                        <button type="submit" className="w-full bg-emerald-600 text-white py-2 rounded-lg">保存</button>
+                        </form>
+                    </Modal>
+
+                    <Modal isOpen={isCigarModalOpen} onClose={() => setIsCigarModalOpen(false)} title="雪茄订单">
+                        <form onSubmit={handleSaveCigar} className="space-y-4">
+                        <div className="grid grid-cols-2 gap-4"><input type="date" value={cigarForm.date} onChange={e => setCigarForm({...cigarForm, date: e.target.value})} className="border p-2 rounded"/><input type="text" placeholder="客户" value={cigarForm.customer} onChange={e => setCigarForm({...cigarForm, customer: e.target.value})} className="border p-2 rounded"/></div>
+                        {cigarForm.items.map((item, idx) => (
+                            <div key={idx} className="border p-2 rounded relative bg-gray-50">
+                                {cigarForm.items.length > 1 && <button type="button" onClick={() => removeCigarItemRow(idx)} className="absolute top-1 right-1 text-red-500"><X size={14}/></button>}
+                                <input type="text" placeholder="产品" value={item.product} onChange={e => updateCigarItemRow(idx, 'product', e.target.value)} className="w-full border p-1 mb-1 rounded"/>
+                                <div className="flex gap-2"><input type="number" placeholder="数量" value={item.quantity} onChange={e => updateCigarItemRow(idx, 'quantity', e.target.value)} className="w-1/2 border p-1 rounded"/><input type="number" placeholder="单价" value={item.unitPrice} onChange={e => updateCigarItemRow(idx, 'unitPrice', e.target.value)} className="w-1/2 border p-1 rounded"/></div>
+                            </div>
+                        ))}
+                        <button type="button" onClick={addCigarItemRow} className="text-sm text-blue-600">+ 添加商品</button>
+                        <button type="submit" className="w-full bg-amber-600 text-white py-2 rounded-lg">保存</button>
+                        </form>
+                    </Modal>
+
+                    <Modal isOpen={isBatchCigarModalOpen} onClose={() => setIsBatchCigarModalOpen(false)} title="批量更新订单">
+                        <div className="space-y-4">
+                            <div><label className="block text-sm font-medium text-gray-700 mb-2">统一状态</label><div className="grid grid-cols-2 gap-2">{['待发货', '已发', '已交割', '囤货'].map(s => <button key={s} onClick={() => setBatchCigarForm({...batchCigarForm, status: s})} className={`py-2 border rounded ${batchCigarForm.status === s ? 'bg-amber-100 border-amber-500 font-bold' : ''}`}>{s}</button>)}</div></div>
+                            <div><label className="block text-sm font-medium text-gray-700 mb-1">统一添加物流/备注 (选填)</label><textarea value={batchCigarForm.logistics} onChange={e => setBatchCigarForm({...batchCigarForm, logistics: e.target.value})} className="w-full border p-2 rounded h-24" placeholder="输入内容将覆盖原有物流信息..."/></div>
+                            <button onClick={handleSaveBatchCigar} className="w-full bg-gray-900 text-white py-3 rounded-lg font-bold">确认批量修改</button>
+                        </div>
+                    </Modal>
+
+                    <Modal isOpen={isCigarStatusModalOpen} onClose={() => setIsCigarStatusModalOpen(false)} title="更新物流">
+                        <div className="space-y-4">
+                            <div className="grid grid-cols-2 gap-2">{['待发货', '已发', '已交割', '囤货'].map(s => <button key={s} onClick={() => setCigarStatusForm({...cigarStatusForm, status: s})} className={`py-2 border rounded ${cigarStatusForm.status === s ? 'bg-amber-100 border-amber-500' : ''}`}>{s}</button>)}</div>
+                            <textarea value={cigarStatusForm.logistics} onChange={e => setCigarStatusForm({...cigarStatusForm, logistics: e.target.value})} className="w-full border p-2 rounded h-24" placeholder="物流单号"/>
+                            <button onClick={handleSaveCigarStatus} className="w-full bg-amber-600 text-white py-2 rounded">更新</button>
+                        </div>
+                    </Modal>
+
+                    <Modal isOpen={isLoanModalOpen} onClose={() => setIsLoanModalOpen(false)} title={activeEditItem ? "编辑借贷档案" : "新建借贷档案"}>
+                        <form onSubmit={handleSaveLoan} className="space-y-4">
+                        <div className="grid grid-cols-2 gap-4"><div><label className="block text-sm">借款人</label><input type="text" required value={loanForm.borrower} onChange={e => setLoanForm({...loanForm, borrower: e.target.value})} className="w-full p-2 border rounded"/></div><div><label className="block text-sm">担保人</label><input type="text" value={loanForm.guarantor} onChange={e => setLoanForm({...loanForm, guarantor: e.target.value})} className="w-full p-2 border rounded"/></div></div>
+                        <div><label className="block text-sm">电话</label><input type="text" value={loanForm.phone} onChange={e => setLoanForm({...loanForm, phone: e.target.value})} className="w-full p-2 border rounded"/></div>
+                        <div className="grid grid-cols-2 gap-4"><div><label className="block text-sm">本金</label><input type="number" required value={loanForm.totalPrincipal} onChange={e => setLoanForm({...loanForm, totalPrincipal: e.target.value})} className="w-full p-2 border rounded"/></div><div><label className="block text-sm">利率</label><input type="text" required value={loanForm.interestRate} onChange={e => setLoanForm({...loanForm, interestRate: e.target.value})} className="w-full p-2 border rounded"/></div></div>
+                        <div className="grid grid-cols-2 gap-4"><div><label className="block text-sm">起息日</label><input type="date" required value={loanForm.startDate} onChange={e => setLoanForm({...loanForm, startDate: e.target.value})} className="w-full p-2 border rounded"/></div><div><label className="block text-sm">资金成本</label><input type="text" placeholder="如 1.5%" value={loanForm.costRate} onChange={e => setLoanForm({...loanForm, costRate: e.target.value})} className="w-full p-2 border rounded"/></div></div>
+                        <div><label className="block text-sm text-amber-600">下次付息日</label><input type="date" value={loanForm.nextPayDate} onChange={e => setLoanForm({...loanForm, nextPayDate: e.target.value})} className="w-full p-2 border border-amber-200 rounded"/></div>
+                        <button type="submit" className="w-full bg-blue-600 text-white py-2 rounded">保存档案</button>
+                        </form>
+                    </Modal>
+
+                    <Modal isOpen={!!activeLoanDetail} onClose={() => setActiveLoanDetail(null)} title={`${activeLoanDetail?.borrower} - 详情`}>
+                        {activeLoanDetail && (
+                            <div className="space-y-6">
+                                <div className="bg-gray-50 p-4 rounded-xl flex justify-between items-center text-sm"><div><span className="text-gray-500 block text-xs">剩余本金</span><span className="font-bold text-2xl">¥{Number(activeLoanDetail.totalPrincipal).toLocaleString()}</span></div><div className="text-right"><span className="text-gray-500 block text-xs">下次应付</span><span className="font-bold text-emerald-600 text-lg">{activeLoanDetail.status === 'completed' ? '已结清' : (activeLoanDetail.nextPayDate || activeLoanDetail.startDate)}</span></div></div>
+                                {activeLoanDetail.status !== 'completed' && (<form onSubmit={handleAddRepayment} className="border p-4 rounded-xl space-y-3 bg-white"><p className="text-sm font-bold flex items-center"><Plus size={16}/> 新增流水</p><div className="grid grid-cols-3 gap-2"><select value={repayForm.type} onChange={e => setRepayForm({...repayForm, type: e.target.value})} className="border p-2 rounded text-sm"><option value="interest">利息</option><option value="principal">还本</option><option value="lend">放款</option></select><input type="number" required placeholder="金额" value={repayForm.amount} onChange={e => setRepayForm({...repayForm, amount: e.target.value})} className="col-span-2 border p-2 rounded text-sm" /></div><div className="flex gap-2"><input type="date" required value={repayForm.date} onChange={e => setRepayForm({...repayForm, date: e.target.value})} className="w-1/3 border p-2 rounded text-sm"/><input type="text" placeholder="备注" value={repayForm.remark} onChange={e => setRepayForm({...repayForm, remark: e.target.value})} className="flex-1 border p-2 rounded text-sm"/></div>{repayForm.type === 'interest' && <div className="flex items-center gap-2 text-xs bg-emerald-50 p-2 rounded"><input type="checkbox" checked={repayForm.isFullPeriodPayment} onChange={e => setRepayForm({...repayForm, isFullPeriodPayment: e.target.checked})}/> <label>结清当期? (推迟付息日)</label></div>}<button type="submit" className="w-full bg-indigo-600 text-white py-2 rounded text-sm">提交</button></form>)}
+                                {activeLoanDetail.status !== 'completed' && (<button onClick={handleArchiveLoan} className="w-full py-2 bg-gray-100 text-gray-600 rounded text-sm flex justify-center items-center gap-2"><Archive size={16}/> 结清并归档</button>)}
+                                <div className="border-t pt-2 max-h-[250px] overflow-y-auto">{activeLoanDetail.transactions.map(t => (<div key={t.id} className="flex justify-between items-center py-2 border-b last:border-0 group">{editingTxId === t.id ? (<div className="w-full bg-blue-50 p-2 rounded space-y-2"><div className="flex gap-2"><input type="date" value={editTxForm.date} onChange={e => setEditTxForm({...editTxForm, date: e.target.value})} className="text-xs border p-1 rounded"/><input type="text" value={editTxForm.amount} onChange={e => setEditTxForm({...editTxForm, amount: e.target.value})} className="text-xs border p-1 rounded w-20"/></div><div className="flex gap-2"><button onClick={saveEditTransaction} className="text-xs bg-blue-600 text-white px-2 rounded">保存</button><button onClick={() => setEditingTxId(null)} className="text-xs bg-gray-300 px-2 rounded">取消</button></div></div>) : (<><div><div className="text-xs text-gray-500">{t.date} <span className={`px-1 rounded ${t.type==='interest'?'bg-emerald-100':'bg-blue-100'}`}>{t.typeName}</span></div><div className="text-sm text-gray-800">{t.remark}</div></div><div className="text-right"><div className="font-bold">¥{Number(t.amount).toLocaleString()}</div>{activeLoanDetail.status !== 'completed' && (<div className="flex gap-2 justify-end md:opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={() => startEditTransaction(t)} className="text-blue-400 p-1"><Edit2 size={12}/></button><button onClick={() => deleteTransaction(t.id)} className="text-red-400 p-1"><Trash2 size={12}/></button></div>)}</div></>)}</div>))}</div>
+                            </div>
+                        )}
+                    </Modal>
+
+                    {/* 侧边栏 (桌面端) */}
+                    <aside className="w-64 bg-white border-r hidden md:flex flex-col flex-shrink-0">
+                        <div className="p-6 border-b flex items-center gap-2 font-bold text-xl text-indigo-700"><LayoutDashboard/> 业务看板</div>
+                        <nav className="p-4 space-y-2">
+                        {[{id:'dashboard', icon:LayoutDashboard, label:'总览'}, {id:'accounts', icon:Wallet, label:'账目'}, {id:'cigars', icon:Cigarette, label:'雪茄'}, {id:'loans', icon:Banknote, label:'借贷'}].map(tab => (
+                            <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`w-full flex items-center gap-3 px-4 py-3 rounded ${activeTab === tab.id ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'}`}>
+                            <tab.icon size={20}/> {tab.label}
+                            </button>
+                        ))}
+                        </nav>
+                    </aside>
+
+                    {/* 底部导航 (手机端 - 新增) */}
+                    <nav className="md:hidden fixed bottom-0 left-0 w-full bg-white border-t border-gray-200 z-40 flex justify-around pb-safe">
+                        {[{id:'dashboard', icon:LayoutDashboard, label:'总览'}, {id:'accounts', icon:Wallet, label:'账目'}, {id:'cigars', icon:Cigarette, label:'雪茄'}, {id:'loans', icon:Banknote, label:'借贷'}].map(tab => (
+                            <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex flex-col items-center justify-center w-full py-3 ${activeTab === tab.id ? 'text-indigo-600' : 'text-gray-400'}`}>
+                                <tab.icon size={20} className={activeTab === tab.id ? 'mb-1' : 'mb-1 opacity-70'}/>
+                                <span className="text-[10px] font-medium">{tab.label}</span>
+                            </button>
+                        ))}
+                    </nav>
+
+                    <main className="flex-1 overflow-y-auto p-4 md:p-6 bg-gray-50 pb-24 md:pb-6">
+                        <div className="max-w-7xl mx-auto">
+                        {activeTab === 'dashboard' && renderDashboard()}
+                        {activeTab === 'accounts' && renderAccounts()}
+                        {activeTab === 'cigars' && renderCigars()}
+                        {activeTab === 'loans' && renderLoans()}
+                        </div>
+                    </main>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<WorkDashboard />);
+    </script>
+</body>
+</html>
