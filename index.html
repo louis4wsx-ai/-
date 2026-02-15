@@ -43,7 +43,7 @@
             AlertTriangle, Users, AlertCircle, MoreHorizontal, Trash2, Package, 
             Archive, CheckCircle, Percent, Calculator, RefreshCw, AlertOctagon, 
             CheckSquare, Square, Filter, CreditCard, Coins, RefreshCcw, RotateCcw, 
-            Box, History, ArrowRight, Upload, Download
+            Box, History, ArrowRight, Upload, Download, FileInput
         } from 'https://esm.sh/lucide-react@0.292.0?bundle';
 
         // 将图标挂载到全局对象，以便 Babel 编译后的 React 代码能访问
@@ -54,13 +54,14 @@
             AlertTriangle, Users, AlertCircle, MoreHorizontal, Trash2, Package, 
             Archive, CheckCircle, Percent, Calculator, RefreshCw, AlertOctagon, 
             CheckSquare, Square, Filter, CreditCard, Coins, RefreshCcw, RotateCcw, 
-            Box, History, ArrowRight, Upload, Download
+            Box, History, ArrowRight, Upload, Download, FileInput
         };
     </script>
 
     <script type="text/babel" data-type="module">
         const { useState, useMemo, useEffect, useRef } = React;
-        // 解构图标
+        // 防御性解构图标，防止 window.Icons 未加载导致崩溃
+        const Icons = window.Icons || {};
         const { 
             LayoutDashboard, Wallet, Cigarette, Banknote, Plus, Search, 
             ArrowUpRight, ArrowDownLeft, ChevronRight, ChevronDown, Calendar, 
@@ -68,12 +69,11 @@
             AlertTriangle, Users, AlertCircle, MoreHorizontal, Trash2, Package, 
             Archive, CheckCircle, Percent, Calculator, RefreshCw, AlertOctagon, 
             CheckSquare, Square, Filter, CreditCard, Coins, RefreshCcw, RotateCcw, 
-            Box, History, ArrowRight, Upload, Download
-        } = window.Icons;
+            Box, History, ArrowRight, Upload, Download, FileInput
+        } = Icons;
 
         // --- 辅助函数 ---
 
-        // 获取本地日期 YYYY-MM-DD (修复时区问题)
         const getLocalDateStr = () => {
             const now = new Date();
             const year = now.getFullYear();
@@ -180,11 +180,13 @@
             return `${y}-${m}-${d}`;
         };
 
+        // 防御性编程：确保 transactions 存在
         const getPrincipalAtDate = (loan, checkDate) => {
             let currentPrincipal = Number(loan.initialPrincipal);
             if (!currentPrincipal && currentPrincipal !== 0) currentPrincipal = Number(loan.totalPrincipal);
 
-            const sortedTx = [...loan.transactions].sort((a, b) => new Date(a.date) - new Date(b.date));
+            const txs = loan.transactions || [];
+            const sortedTx = [...txs].sort((a, b) => new Date(a.date) - new Date(b.date));
 
             for (const t of sortedTx) {
                 const tDate = new Date(t.date);
@@ -225,7 +227,8 @@
                 cursor.setHours(0,0,0,0);
             }
 
-            const totalPaidInterest = loan.transactions
+            const txs = loan.transactions || [];
+            const totalPaidInterest = txs
                 .filter(t => t.type === 'interest')
                 .reduce((acc, t) => acc + Number(t.amount), 0);
 
@@ -255,10 +258,11 @@
         const calculateFinancials = (loan) => {
             const costRate = parseRate(loan.costRate);
             const events = [];
+            const txs = loan.transactions || [];
             
             events.push({ date: new Date(loan.startDate), type: 'start', amount: 0 });
             
-            loan.transactions.forEach(t => {
+            txs.forEach(t => {
                 if (t.type === 'principal' || t.type === 'lend') {
                 events.push({ date: new Date(t.date), type: t.type, amount: Number(t.amount) });
                 }
@@ -297,7 +301,7 @@
                 }
             }
 
-            const totalInterestCollected = loan.transactions
+            const totalInterestCollected = txs
                 .filter(t => t.type === 'interest')
                 .reduce((acc, t) => acc + Number(t.amount), 0);
 
@@ -309,9 +313,10 @@
         };
 
         const recalculateLoanState = (loan) => {
-            const sortedTransactions = [...loan.transactions].sort((a, b) => new Date(b.date) - new Date(a.date));
+            const txs = loan.transactions || [];
+            const sortedTransactions = [...txs].sort((a, b) => new Date(b.date) - new Date(a.date));
             let currentPrincipal = Number(loan.initialPrincipal);
-            const chronologicalTransactions = [...loan.transactions].sort((a, b) => new Date(a.date) - new Date(b.date));
+            const chronologicalTransactions = [...txs].sort((a, b) => new Date(a.date) - new Date(b.date));
             
             chronologicalTransactions.forEach(t => {
                 if (t.type === 'lend') {
@@ -391,15 +396,11 @@
             return data;
         };
 
-        // --- 预置真实数据 (已清空，适合部署) ---
+        // --- 预置数据 ---
         const initialAccounts = [];
-
         const initialCustomerDeposits = {};
-
         const initialDepositLogs = [];
-
         const initialCigars = [];
-
         const initialLoans = [];
 
         // --- 组件 ---
@@ -411,7 +412,7 @@
                     <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in duration-200">
                         <div className="p-6 text-center">
                             <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-amber-100 mb-4">
-                                <AlertOctagon className="h-6 w-6 text-amber-600" />
+                                {Icons.AlertOctagon ? <Icons.AlertOctagon className="h-6 w-6 text-amber-600" /> : <span className="text-2xl">!</span>}
                             </div>
                             <h3 className="text-lg font-bold text-gray-900 mb-2">{title}</h3>
                             <p className="text-sm text-gray-500 whitespace-pre-line">{message}</p>
@@ -433,7 +434,7 @@
                         <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50 shrink-0">
                             <h3 className="font-bold text-gray-800 text-lg">{title}</h3>
                             <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1 hover:bg-gray-200 rounded-full transition-colors">
-                                <X size={20}/>
+                                {Icons.X && <Icons.X size={20}/>}
                             </button>
                         </div>
                         <div className="p-6 overflow-y-auto overscroll-contain">
@@ -455,7 +456,7 @@
                 {subtext && <p className="text-xs mt-2 text-gray-400">{subtext}</p>}
                 </div>
                 <div className={`p-3 rounded-lg ${colorClass ? colorClass.replace('text-', 'bg-').replace('600', '100') : 'bg-gray-100'} ${onClick ? 'group-hover:scale-110 transition-transform' : ''}`}>
-                <Icon className={`w-6 h-6 ${colorClass || 'text-gray-600'}`} />
+                {Icon && <Icon className={`w-6 h-6 ${colorClass || 'text-gray-600'}`} />}
                 </div>
             </div>
         );
@@ -601,11 +602,11 @@
             }, [accounts]);
 
             const loanStats = useMemo(() => {
-                const activeLoans = loans.filter(l => l.status === 'active');
+                const activeLoans = (loans || []).filter(l => l.status === 'active');
                 const totalPrincipal = activeLoans.reduce((acc, curr) => acc + Number(curr.totalPrincipal), 0);
                 
                 let totalNetProfit = 0;
-                loans.forEach(l => {
+                (loans || []).forEach(l => {
                 const fin = calculateFinancials(l);
                 totalNetProfit += fin.netProfit;
                 });
@@ -710,19 +711,51 @@
                 const dateStr = getLocalDateStr();
 
                 if (type === 'accounts') {
-                data = accounts;
-                filename = `账目备份_${dateStr}.csv`;
-                headers = ['日期', '项目', '支出', '收入', '备注'];
-                keys = ['date', 'project', 'expense', 'income', 'remark'];
+                    data = accounts;
+                    filename = `账目备份_${dateStr}.csv`;
+                    headers = ['日期', '项目', '支出', '收入', '备注'];
+                    keys = ['date', 'project', 'expense', 'income', 'remark'];
                 } else if (type === 'cigars') {
-                data = cigars;
-                filename = `雪茄订单备份_${dateStr}.csv`;
-                headers = ['日期', '客户', '产品', '数量', '单价', '总价', '状态', '物流/备注'];
-                } else if (type === 'loans') {
-                data = loans;
-                filename = `借贷档案备份_${dateStr}.csv`;
-                headers = ['借款人', '担保人', '电话', '剩余本金', '初始本金', '起息日', '下次付息日', '利率', '资金成本', '状态'];
-                keys = ['borrower', 'guarantor', 'phone', 'totalPrincipal', 'initialPrincipal', 'startDate', 'nextPayDate', 'interestRate', 'costRate', 'status'];
+                    data = cigars;
+                    filename = `雪茄订单备份_${dateStr}.csv`;
+                    headers = ['日期', '客户', '产品', '数量', '单价', '总价', '状态', '物流/备注'];
+                } else if (type === 'loans_merged') {
+                    headers = ['借贷ID', '借款人', '担保人', '电话', '初始本金', '剩余本金', '起息日', '下次付息日', '利率', '资金成本', '状态', '流水ID', '流水日期', '流水类型', '流水金额', '流水备注'];
+                    keys = ['id', 'borrower', 'guarantor', 'phone', 'initialPrincipal', 'totalPrincipal', 'startDate', 'nextPayDate', 'interestRate', 'costRate', 'status', 'txId', 'txDate', 'txTypeName', 'txAmount', 'txRemark'];
+                    
+                    data = [];
+                    loans.forEach(loan => {
+                        const loanBase = {
+                            id: loan.id,
+                            borrower: loan.borrower,
+                            guarantor: loan.guarantor,
+                            phone: loan.phone,
+                            initialPrincipal: loan.initialPrincipal,
+                            totalPrincipal: loan.totalPrincipal,
+                            startDate: loan.startDate,
+                            nextPayDate: loan.nextPayDate,
+                            interestRate: loan.interestRate,
+                            costRate: loan.costRate,
+                            status: loan.status
+                        };
+                        
+                        const txs = loan.transactions || [];
+                        if (txs.length === 0) {
+                            data.push({ ...loanBase, txId: '', txDate: '', txTypeName: '', txAmount: '', txRemark: '' });
+                        } else {
+                            txs.forEach(t => {
+                                data.push({
+                                    ...loanBase,
+                                    txId: t.id,
+                                    txDate: t.date,
+                                    txTypeName: t.typeName, 
+                                    txAmount: t.amount,
+                                    txRemark: t.remark
+                                });
+                            });
+                        }
+                    });
+                    filename = `借贷及流水完整备份_${dateStr}.csv`;
                 }
 
                 const csvContent = [
@@ -762,52 +795,220 @@
                 document.body.removeChild(link);
             };
 
-            const handleImportCSV = (e, type) => {
+            const handleImportCSV = (e, explicitType = null) => {
                 const file = e.target.files[0];
                 if (!file) return;
 
                 const reader = new FileReader();
                 reader.onload = (evt) => {
-                const text = evt.target.result;
-                const data = parseCSV(text); 
-                let newCount = 0;
-                let dupCount = 0;
-
-                if (type === 'accounts') {
-                    const existingSignatures = new Set(accounts.map(a => 
-                    `${a.date}|${a.project}|${Number(a.expense)}|${Number(a.income)}|${a.remark.trim()}`
-                    ));
-
-                    const newItems = [];
-                    data.forEach((row) => {
-                    const cleanAmount = (val) => {
-                        if (!val) return 0;
-                        return Number(String(val).replace(/,/g, '')) || 0;
-                    };
-
-                    const expense = cleanAmount(row['支出金额'] || row['支出']);
-                    const income = cleanAmount(row['收入金额'] || row['收入']);
-                    const date = row['日期'] || row['Date'] || getLocalDateStr();
-                    const project = row['项目名称'] || row['项目'] || row['Project'] || '导入数据';
-                    const remark = row['备注'] || row['Remark'] || '';
-
-                    const signature = `${date}|${project}|${expense}|${income}|${remark.trim()}`;
-
-                    if (existingSignatures.has(signature)) {
-                        dupCount++;
-                    } else {
-                        newItems.push({
-                        id: Date.now() + Math.random(), 
-                        date, project, expense, income, remark
-                        });
-                        existingSignatures.add(signature); 
-                        newCount++;
+                    const text = evt.target.result;
+                    const data = parseCSV(text); 
+                    
+                    if (data.length === 0) {
+                        alert("文件内容为空或格式不正确");
+                        return;
                     }
-                    });
-                    setAccounts(prev => [...prev, ...newItems]);
-                } 
-                
-                alert(`导入完成！\n成功导入: ${newCount} 条\n跳过重复: ${dupCount} 条`);
+
+                    let type = explicitType;
+                    if (!type) {
+                        const headers = Object.keys(data[0]);
+                        if (headers.includes('流水ID') && headers.includes('借贷ID') && headers.includes('初始本金')) {
+                            type = 'loans_merged';
+                        } else if (headers.includes('流水ID') && headers.includes('借贷ID')) {
+                            type = 'loan_transactions_legacy';
+                        } else if ((headers.includes('剩余本金') || headers.includes('初始本金')) && headers.includes('借贷ID')) {
+                            type = 'loans_legacy';
+                        } else if (headers.includes('支出') || headers.includes('支出金额')) {
+                            type = 'accounts';
+                        } else if (headers.includes('产品') && headers.includes('单价')) {
+                            type = 'cigars';
+                        } else {
+                            alert("无法识别的文件格式，请检查表头是否正确。");
+                            return;
+                        }
+                    }
+
+                    let newCount = 0;
+                    let dupCount = 0;
+
+                    if (type === 'accounts') {
+                        const existingSignatures = new Set(accounts.map(a => 
+                        `${a.date}|${a.project}|${Number(a.expense)}|${Number(a.income)}|${a.remark.trim()}`
+                        ));
+
+                        const newItems = [];
+                        data.forEach((row) => {
+                        const cleanAmount = (val) => {
+                            if (!val) return 0;
+                            return Number(String(val).replace(/,/g, '')) || 0;
+                        };
+
+                        const expense = cleanAmount(row['支出金额'] || row['支出']);
+                        const income = cleanAmount(row['收入金额'] || row['收入']);
+                        const date = row['日期'] || row['Date'] || getLocalDateStr();
+                        const project = row['项目名称'] || row['项目'] || row['Project'] || '导入数据';
+                        const remark = row['备注'] || row['Remark'] || '';
+
+                        const signature = `${date}|${project}|${expense}|${income}|${remark.trim()}`;
+
+                        if (existingSignatures.has(signature)) {
+                            dupCount++;
+                        } else {
+                            newItems.push({
+                            id: Date.now() + Math.random(), 
+                            date, project, expense, income, remark
+                            });
+                            existingSignatures.add(signature); 
+                            newCount++;
+                        }
+                        });
+                        setAccounts(prev => [...prev, ...newItems]);
+                        alert(`账目导入完成！\n成功导入: ${newCount} 条\n跳过重复: ${dupCount} 条`);
+                    } else if (type === 'loans_merged') {
+                        const loansMap = {}; 
+                        
+                        data.forEach(row => {
+                            const id = row['借贷ID'];
+                            if (!id) return;
+
+                            if (!loansMap[id]) {
+                                loansMap[id] = {
+                                    id: id,
+                                    borrower: row['借款人'],
+                                    guarantor: row['担保人'] || '',
+                                    phone: row['电话'] || '',
+                                    initialPrincipal: Number(row['初始本金']) || 0,
+                                    startDate: row['起息日'] || getLocalDateStr(),
+                                    nextPayDate: row['下次付息日'] || '',
+                                    interestRate: row['利率'] || '',
+                                    costRate: row['资金成本'] || '',
+                                    status: row['状态'] || 'active',
+                                    transactions: []
+                                };
+                            }
+
+                            const txId = row['流水ID'];
+                            if (txId) {
+                                const typeName = row['流水类型'];
+                                let typeKey = 'interest';
+                                if (typeName === '本金归还') typeKey = 'principal';
+                                else if (typeName === '放款') typeKey = 'lend';
+                                else if (typeName === '追加放款') typeKey = 'lend'; 
+
+                                loansMap[id].transactions.push({
+                                    id: Number(txId),
+                                    date: row['流水日期'],
+                                    type: typeKey,
+                                    typeName: typeName,
+                                    amount: Number(row['流水金额']),
+                                    remark: row['流水备注'] || ''
+                                });
+                            }
+                        });
+
+                        const newLoansList = Object.values(loansMap).map(loan => {
+                             const hasLendTx = loan.transactions.some(t => t.type === 'lend');
+                             if (hasLendTx && loan.initialPrincipal > 0) {
+                                 loan.initialPrincipal = 0;
+                             }
+                             return recalculateLoanState(loan);
+                        });
+                        
+                        const incomingIds = new Set(newLoansList.map(l => String(l.id)));
+                        const currentLoansKept = loans.filter(l => !incomingIds.has(String(l.id)));
+                        
+                        setLoans([...currentLoansKept, ...newLoansList]);
+                        alert(`导入成功！\n共处理 ${newLoansList.length} 个借贷档案及其流水。\n已根据导入的流水自动重新计算本金余额。`);
+
+                    } else if (type === 'loans_legacy') {
+                        const existingIds = new Set(loans.map(l => String(l.id)));
+                        const newLoans = [];
+                        data.forEach(row => {
+                            const id = row['借贷ID'] || Date.now() + Math.random();
+                            if (!existingIds.has(String(id))) {
+                                newLoans.push({
+                                    id: id,
+                                    borrower: row['借款人'],
+                                    guarantor: row['担保人'] || '',
+                                    phone: row['电话'] || '',
+                                    totalPrincipal: Number(row['剩余本金']) || 0,
+                                    initialPrincipal: Number(row['初始本金']) || Number(row['剩余本金']) || 0,
+                                    startDate: row['起息日'] || getLocalDateStr(),
+                                    nextPayDate: row['下次付息日'] || '',
+                                    interestRate: row['利率'] || '',
+                                    costRate: row['资金成本'] || '',
+                                    status: row['状态'] || 'active',
+                                    transactions: [] 
+                                });
+                                existingIds.add(String(id));
+                                newCount++;
+                            } else {
+                                dupCount++;
+                            }
+                        });
+                        setLoans(prev => [...prev, ...newLoans]);
+                        alert(`旧版档案导入完成！成功: ${newCount} 条 (请记得单独导入流水)`);
+
+                    } else if (type === 'loan_transactions_legacy') {
+                        const updatedLoans = [...loans];
+                        data.forEach(row => {
+                            const loanId = row['借贷ID'];
+                            const txId = row['流水ID'];
+                            const typeName = row['类型'];
+                            let typeKey = 'interest';
+                            if (typeName === '本金归还') typeKey = 'principal';
+                            else if (typeName === '放款') typeKey = 'lend';
+
+                            let loan = updatedLoans.find(l => String(l.id) === String(loanId));
+                            if (!loan) loan = updatedLoans.find(l => l.borrower === row['借款人']);
+
+                            if (loan) {
+                                if (!loan.transactions) loan.transactions = [];
+                                const exists = loan.transactions.some(t => String(t.id) === String(txId));
+                                if (!exists) {
+                                    loan.transactions.push({
+                                        id: txId ? Number(txId) : Date.now() + Math.random(),
+                                        date: row['日期'],
+                                        type: typeKey,
+                                        typeName: typeName,
+                                        amount: Number(row['金额']),
+                                        remark: row['备注'] || ''
+                                    });
+                                    const recalculatedLoan = recalculateLoanState(loan);
+                                    const idx = updatedLoans.indexOf(loan);
+                                    updatedLoans[idx] = recalculatedLoan;
+                                    newCount++;
+                                } else {
+                                    dupCount++;
+                                }
+                            }
+                        });
+                        setLoans(updatedLoans);
+                        alert(`旧版流水导入完成！成功: ${newCount} 条`);
+                    } else if (type === 'cigars') {
+                        const newItems = [];
+                        data.forEach((row) => {
+                             const signature = `${row['日期']}|${row['客户']}|${row['产品']}|${row['总价']}`;
+                             if (!cigars.some(c => `${c.date}|${c.customer}|${c.product}|${c.totalPrice}` === signature)) {
+                                 newItems.push({
+                                     id: Date.now() + Math.random(),
+                                     date: row['日期'],
+                                     customer: row['客户'],
+                                     product: row['产品'],
+                                     quantity: Number(row['数量']),
+                                     unitPrice: Number(row['单价']),
+                                     totalPrice: Number(row['总价']),
+                                     status: row['状态'],
+                                     logistics: row['物流/备注']
+                                 });
+                                 newCount++;
+                             } else {
+                                 dupCount++;
+                             }
+                        });
+                        setCigars(prev => [...prev, ...newItems]);
+                        alert(`雪茄订单导入完成！\n成功导入: ${newCount} 条\n跳过重复: ${dupCount} 条`);
+                    }
                 };
                 reader.readAsText(file);
                 e.target.value = ''; 
@@ -1079,7 +1280,7 @@
                 const newItem = {
                     id: Date.now(),
                     ...loanForm,
-                    initialPrincipal: Number(loanForm.totalPrincipal),
+                    initialPrincipal: 0, // Fix for double principal
                     totalPrincipal: Number(loanForm.totalPrincipal),
                     nextPayDate: firstPayDate,
                     status: 'active',
@@ -1108,7 +1309,8 @@
 
                 const updatedLoans = loans.map(l => {
                 if (l.id === activeLoanDetail.id) {
-                    const updatedTransactions = [newTransaction, ...l.transactions];
+                    const txs = l.transactions || [];
+                    const updatedTransactions = [newTransaction, ...txs];
                     let nextDate = l.nextPayDate;
                     if (repayForm.type === 'interest' && repayForm.isFullPeriodPayment) {
                         const baseDate = l.nextPayDate || l.startDate;
@@ -1133,7 +1335,8 @@
                 if (!activeLoanDetail) return;
                 const updatedLoans = loans.map(l => {
                 if (l.id === activeLoanDetail.id) {
-                    const updatedTransactions = l.transactions.map(t => {
+                    const txs = l.transactions || [];
+                    const updatedTransactions = txs.map(t => {
                     if (t.id === editingTxId) {
                         return {
                         ...t,
@@ -1163,7 +1366,8 @@
                 onConfirm: () => {
                     const updatedLoans = loans.map(l => {
                     if (l.id === activeLoanDetail.id) {
-                        const updatedTransactions = l.transactions.filter(t => t.id !== txId);
+                        const txs = l.transactions || [];
+                        const updatedTransactions = txs.filter(t => t.id !== txId);
                         return recalculateLoanState({ ...l, transactions: updatedTransactions });
                     }
                     return l;
@@ -1177,7 +1381,7 @@
             // --- Render Functions ---
 
             const renderDashboard = () => {
-                const criticalList = loans
+                const criticalList = (loans || [])
                 .filter(l => l.status === 'active')
                 .map(loan => {
                     const countdown = getInterestCountdown(loan.nextPayDate);
@@ -1218,17 +1422,17 @@
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <Card onClick={() => setActiveTab('accounts')} title="账目资金池" value={`¥${dashboardStats.balance.toLocaleString()}`} subtext="当前流动余额" icon={Wallet} colorClass="text-emerald-600"/>
-                    <Card onClick={() => setActiveTab('loans')} title="利息业务 - 当月" value={`${loanStats.dueSoonCount} 人临期`} subtext={`${loanStats.overdueCount} 人逾期 | 共 ${loans.filter(l => l.status === 'active').length} 笔未结清`} icon={Banknote} colorClass="text-blue-600" highlight={loanStats.overdueCount > 0}/>
-                    <Card onClick={() => setActiveTab('cigars')} title="雪茄待处理" value={cigars.filter(c => c.status !== '已交割').length} subtext="待发货 / 运输中" icon={Truck} colorClass="text-amber-600"/>
+                    <Card onClick={() => setActiveTab('accounts')} title="账目资金池" value={`¥${dashboardStats.balance.toLocaleString()}`} subtext="当前流动余额" icon={Icons.Wallet || Icons.Box} colorClass="text-emerald-600"/>
+                    <Card onClick={() => setActiveTab('loans')} title="利息业务 - 当月" value={`${loanStats.dueSoonCount} 人临期`} subtext={`${loanStats.overdueCount} 人逾期 | 共 ${(loans || []).filter(l => l.status === 'active').length} 笔未结清`} icon={Icons.Banknote || Icons.Box} colorClass="text-blue-600" highlight={loanStats.overdueCount > 0}/>
+                    <Card onClick={() => setActiveTab('cigars')} title="雪茄待处理" value={cigars.filter(c => c.status !== '已交割').length} subtext="待发货 / 运输中" icon={Icons.Truck || Icons.Box} colorClass="text-amber-600"/>
                     </div>
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                     <div onClick={() => setActiveTab('cigars')} className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 cursor-pointer hover:shadow-md transition-all group">
-                        <div className="flex justify-between items-center mb-4"><h3 className="text-lg font-bold text-gray-800 flex items-center group-hover:text-amber-600 transition-colors"><Package className="w-5 h-5 mr-2 text-amber-600" />最新雪茄订单</h3><span className="text-xs text-amber-600 hover:underline">查看全部</span></div>
+                        <div className="flex justify-between items-center mb-4"><h3 className="text-lg font-bold text-gray-800 flex items-center group-hover:text-amber-600 transition-colors">{Icons.Package && <Icons.Package className="w-5 h-5 mr-2 text-amber-600" />}最新雪茄订单</h3><span className="text-xs text-amber-600 hover:underline">查看全部</span></div>
                         <div className="space-y-3">{cigars.slice(-5).reverse().map(item => (<div key={item.id} className="flex justify-between items-center p-3 hover:bg-gray-50 rounded-lg transition-colors border border-gray-50"><div><p className="font-medium text-gray-800 text-sm">{item.product}</p><p className="text-xs text-gray-500">{item.customer} | {item.date}</p></div><Badge type={item.status === '已交割' ? 'success' : item.status === '待发货' ? 'warning' : 'info'}>{item.status}</Badge></div>))}</div>
                     </div>
                     <div onClick={() => setActiveTab('loans')} className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 cursor-pointer hover:shadow-md transition-all group">
-                        <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center group-hover:text-blue-600 transition-colors"><AlertCircle className="w-5 h-5 mr-2 text-rose-500" />利息逾期/临期 (未结清)</h3>
+                        <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center group-hover:text-blue-600 transition-colors">{Icons.AlertCircle && <Icons.AlertCircle className="w-5 h-5 mr-2 text-rose-500" />}利息逾期/临期 (未结清)</h3>
                         <div className="space-y-3">
                         {criticalList.length === 0 ? (
                             <p className="text-gray-400 text-sm text-center py-4">暂无临期或逾期记录</p>
@@ -1263,11 +1467,11 @@
                         <div><h2 className="text-xl font-bold text-gray-800">账目管理</h2><p className="text-sm text-gray-500 mt-1">资金进出明细</p></div>
                         <div className="flex gap-2 w-full md:w-auto overflow-x-auto no-scrollbar">
                             <label className="bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-lg text-sm font-medium cursor-pointer hover:bg-gray-50 flex items-center shrink-0">
-                                <Upload size={16} className="mr-2"/> 导入CSV
+                                {Icons.Upload && <Icons.Upload size={16} className="mr-2"/>} 导入CSV
                                 <input type="file" accept=".csv" className="hidden" onChange={(e) => handleImportCSV(e, 'accounts')} />
                             </label>
-                            <button onClick={() => handleExportCSV('accounts')} className="bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 flex items-center shrink-0"><Download size={16} className="mr-2"/> 备份</button>
-                            <button onClick={() => openAccountModal()} className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg flex items-center text-sm font-medium shrink-0"><Plus className="w-4 h-4 mr-2" /> 新增账目</button>
+                            <button onClick={() => handleExportCSV('accounts')} className="bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 flex items-center shrink-0">{Icons.Download && <Icons.Download size={16} className="mr-2"/>} 备份</button>
+                            <button onClick={() => openAccountModal()} className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg flex items-center text-sm font-medium shrink-0">{Icons.Plus && <Icons.Plus className="w-4 h-4 mr-2" />} 新增账目</button>
                         </div>
                     </div>
                 
@@ -1301,7 +1505,7 @@
                                         onClick={(e) => { e.stopPropagation(); handleDeleteAccount(item.id); }} 
                                         className="text-gray-300 hover:text-rose-500 p-1 rounded-full hover:bg-rose-50 transition-colors"
                                         >
-                                        <Trash2 size={14}/>
+                                        {Icons.Trash2 && <Icons.Trash2 size={14}/>}
                                         </button>
                                     </div>
                                     </td>
@@ -1341,21 +1545,21 @@
 
                     <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-3 rounded-xl border border-gray-100 shadow-sm gap-3">
                         <div className="flex items-center gap-2 overflow-x-auto no-scrollbar w-full md:w-auto">
-                            <button onClick={() => setIsBalanceModalOpen(true)} className="flex items-center text-gray-600 hover:text-indigo-600 text-sm font-medium transition-colors bg-gray-50 px-3 py-2 rounded-lg hover:bg-indigo-50 shrink-0"><CreditCard size={16} className="mr-2"/> 管理客户余额</button>
+                            <button onClick={() => setIsBalanceModalOpen(true)} className="flex items-center text-gray-600 hover:text-indigo-600 text-sm font-medium transition-colors bg-gray-50 px-3 py-2 rounded-lg hover:bg-indigo-50 shrink-0">{Icons.CreditCard && <Icons.CreditCard size={16} className="mr-2"/>} 管理客户余额</button>
                             <div className="flex items-center gap-2">
-                                <label className="flex items-center text-gray-600 hover:text-indigo-600 text-sm font-medium transition-colors bg-gray-50 px-3 py-2 rounded-lg hover:bg-indigo-50 cursor-pointer shrink-0"><Upload size={16} className="mr-2"/> 导入<input type="file" accept=".csv" className="hidden" onChange={(e) => handleImportCSV(e, 'cigars')} /></label>
-                                <button onClick={() => handleExportCSV('cigars')} className="flex items-center text-gray-600 hover:text-indigo-600 text-sm font-medium transition-colors bg-gray-50 px-3 py-2 rounded-lg hover:bg-indigo-50 shrink-0"><Download size={16} className="mr-2"/> 备份</button>
+                                <label className="flex items-center text-gray-600 hover:text-indigo-600 text-sm font-medium transition-colors bg-gray-50 px-3 py-2 rounded-lg hover:bg-indigo-50 cursor-pointer shrink-0">{Icons.Upload && <Icons.Upload size={16} className="mr-2"/>} 导入<input type="file" accept=".csv" className="hidden" onChange={(e) => handleImportCSV(e, 'cigars')} /></label>
+                                <button onClick={() => handleExportCSV('cigars')} className="flex items-center text-gray-600 hover:text-indigo-600 text-sm font-medium transition-colors bg-gray-50 px-3 py-2 rounded-lg hover:bg-indigo-50 shrink-0">{Icons.Download && <Icons.Download size={16} className="mr-2"/>} 备份</button>
                             </div>
                         </div>
                         <div className="flex items-center gap-4 w-full md:w-auto justify-between md:justify-end">
-                            <div onClick={handleSelectAllCigars} className="flex items-center cursor-pointer text-gray-500 hover:text-gray-800 text-sm select-none">{isAllSelected ? <CheckSquare className="mr-2 text-amber-500" size={18}/> : <Square className="mr-2" size={18}/>} 全选</div>
-                            <button onClick={() => openCigarModal()} className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-lg flex items-center transition-all text-sm shadow-sm font-bold"><Plus className="w-4 h-4 mr-2" /> 新增订单</button>
+                            <div onClick={handleSelectAllCigars} className="flex items-center cursor-pointer text-gray-500 hover:text-gray-800 text-sm select-none">{isAllSelected ? (Icons.CheckSquare && <Icons.CheckSquare className="mr-2 text-amber-500" size={18}/>) : (Icons.Square && <Icons.Square className="mr-2" size={18}/>)} 全选</div>
+                            <button onClick={() => openCigarModal()} className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-lg flex items-center transition-all text-sm shadow-sm font-bold">{Icons.Plus && <Icons.Plus className="w-4 h-4 mr-2" />} 新增订单</button>
                         </div>
                     </div>
 
                     <div className="bg-white p-4 rounded-xl border border-gray-100 flex justify-between items-center shadow-sm">
                         <div className="flex items-center gap-4">
-                            <div className="bg-amber-50 p-2 rounded-lg"><Calendar className="text-amber-600" size={20}/></div>
+                            <div className="bg-amber-50 p-2 rounded-lg">{Icons.Calendar && <Icons.Calendar className="text-amber-600" size={20}/>}</div>
                             <div><p className="text-xs text-gray-500 uppercase font-bold">月度账单统计</p><div className="flex items-baseline gap-2"><span className="font-bold text-gray-800 text-lg">¥{cigarMonthlyStats.totalAmount.toLocaleString()}</span><span className="text-xs text-gray-400">共 {cigarMonthlyStats.count} 单</span></div></div>
                         </div>
                         <div className="flex items-center gap-4"><input type="month" value={cigarMonth} onChange={(e) => setCigarMonth(e.target.value)} className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm outline-none focus:border-amber-500"/><div className="text-right text-xs text-gray-500 hidden md:block"><div>已交割: {cigarMonthlyStats.delivered}</div><div>待发货: {cigarMonthlyStats.pending}</div></div></div>
@@ -1374,14 +1578,14 @@
                             const balance = getCustomerBalance(item.customer);
                             return (
                             <div key={item.id} className={`bg-white rounded-xl shadow-sm border ${isSelected ? 'border-amber-400 ring-2 ring-amber-100' : 'border-gray-100'} p-5 relative overflow-hidden group hover:shadow-md transition-all cursor-pointer`} onClick={() => handleToggleSelectCigar(item.id)}>
-                                <div className="absolute top-4 left-4 z-10 text-gray-300">{isSelected ? <CheckSquare className="text-amber-500" size={24}/> : <Square size={24}/>}</div>
-                                <div className="absolute top-2 right-2 z-20"><button onClick={(e) => { e.stopPropagation(); handleDeleteCigar(item.id); }} className="p-1.5 text-gray-300 hover:text-rose-500 rounded-full hover:bg-rose-50 transition-colors"><Trash2 size={16}/></button></div>
+                                <div className="absolute top-4 left-4 z-10 text-gray-300">{isSelected ? (Icons.CheckSquare && <Icons.CheckSquare className="text-amber-500" size={24}/>) : (Icons.Square && <Icons.Square size={24}/>)}</div>
+                                <div className="absolute top-2 right-2 z-20"><button onClick={(e) => { e.stopPropagation(); handleDeleteCigar(item.id); }} className="p-1.5 text-gray-300 hover:text-rose-500 rounded-full hover:bg-rose-50 transition-colors">{Icons.Trash2 && <Icons.Trash2 size={16}/>}</button></div>
                                 <div className={`absolute top-0 left-0 w-1.5 h-full ${item.status === '已交割' ? 'bg-emerald-500' : item.status === '待发货' ? 'bg-amber-500' : item.status === '已发' ? 'bg-blue-500' : item.status === '囤货' ? 'bg-indigo-500' : 'bg-rose-500'}`}></div>
                                 <div className="mb-3 pl-8">
-                                    <div className="flex justify-between items-start mb-2"><h3 className="font-bold text-lg text-gray-900 leading-tight w-1/2">{item.product}</h3><div className="flex items-center justify-end text-gray-800 font-bold text-lg w-1/2"><User size={18} className="mr-1.5 text-gray-400"/> {item.customer}</div></div>
+                                    <div className="flex justify-between items-start mb-2"><h3 className="font-bold text-lg text-gray-900 leading-tight w-1/2">{item.product}</h3><div className="flex items-center justify-end text-gray-800 font-bold text-lg w-1/2">{Icons.User && <Icons.User size={18} className="mr-1.5 text-gray-400"/>} {item.customer}</div></div>
                                     <div className="flex justify-between items-center mb-3 pb-3 border-b border-gray-100"><div className="text-sm text-gray-500">数量: <span className="font-bold text-gray-800">{item.quantity}</span></div><div className="text-base font-bold text-gray-700">¥{item.totalPrice.toLocaleString()}</div></div>
-                                    <div className="bg-gray-50 rounded border border-gray-100 p-2.5 mb-3 text-sm min-h-[50px] flex items-center">{item.logistics ? <div className="flex items-start w-full"><Truck size={14} className="mr-2 mt-0.5 text-amber-500 flex-shrink-0"/> <span className="text-gray-700 leading-snug break-all">{item.logistics}</span></div> : <span className="text-gray-400 italic w-full text-center text-xs">暂无物流信息</span>}</div>
-                                    <div className="flex justify-between items-end"><div className="flex flex-col gap-1"><p className="text-xs text-gray-400 font-mono">{item.date}</p><div className={`text-xs font-medium px-1.5 py-0.5 rounded w-fit ${balance >= 0 ? 'bg-blue-50 text-blue-600' : 'bg-rose-50 text-rose-600'}`}>余: ¥{balance.toLocaleString()}</div></div><div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}><Badge clickable onClick={() => openCigarStatusModal(item)} type={item.status === '已交割' ? 'success' : item.status === '待发货' ? 'warning' : item.status === '售后' ? 'danger' : item.status === '囤货' ? 'purple' : 'info'}>{item.status}</Badge><button onClick={() => openCigarModal(item)} className="p-1.5 hover:bg-gray-100 rounded text-gray-400 hover:text-indigo-600"><Edit2 size={16}/></button></div></div>
+                                    <div className="bg-gray-50 rounded border border-gray-100 p-2.5 mb-3 text-sm min-h-[50px] flex items-center">{item.logistics ? <div className="flex items-start w-full">{Icons.Truck && <Icons.Truck size={14} className="mr-2 mt-0.5 text-amber-500 flex-shrink-0"/>} <span className="text-gray-700 leading-snug break-all">{item.logistics}</span></div> : <span className="text-gray-400 italic w-full text-center text-xs">暂无物流信息</span>}</div>
+                                    <div className="flex justify-between items-end"><div className="flex flex-col gap-1"><p className="text-xs text-gray-400 font-mono">{item.date}</p><div className={`text-xs font-medium px-1.5 py-0.5 rounded w-fit ${balance >= 0 ? 'bg-blue-50 text-blue-600' : 'bg-rose-50 text-rose-600'}`}>余: ¥{balance.toLocaleString()}</div></div><div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}><Badge clickable onClick={() => openCigarStatusModal(item)} type={item.status === '已交割' ? 'success' : item.status === '待发货' ? 'warning' : item.status === '售后' ? 'danger' : item.status === '囤货' ? 'purple' : 'info'}>{item.status}</Badge><button onClick={() => openCigarModal(item)} className="p-1.5 hover:bg-gray-100 rounded text-gray-400 hover:text-indigo-600">{Icons.Edit2 && <Icons.Edit2 size={16}/>}</button></div></div>
                                 </div>
                             </div>
                         )})}
@@ -1391,8 +1595,8 @@
                         <div className="fixed bottom-24 md:bottom-6 left-1/2 transform -translate-x-1/2 bg-white border border-gray-200 text-gray-800 px-6 py-4 rounded-xl shadow-2xl flex items-center space-x-6 z-50 animate-in slide-in-from-bottom-10 fade-in duration-300 min-w-[300px]">
                             <div className="flex items-center"><div className="bg-amber-100 text-amber-700 font-bold px-2 py-1 rounded text-xs mr-2">{selectedCigarIds.length}</div><span className="font-bold text-sm">项已选</span></div>
                             <div className="h-8 w-px bg-gray-200"></div>
-                            <div className="flex space-x-2"><button onClick={openBatchCigarModal} className="bg-gray-900 hover:bg-black text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-lg flex items-center"><Edit2 size={14} className="mr-2"/> 批量修改</button></div>
-                            <button onClick={() => setSelectedCigarIds([])} className="ml-auto text-gray-400 hover:text-gray-600 p-1 rounded-full"><X size={18}/></button>
+                            <div className="flex space-x-2"><button onClick={openBatchCigarModal} className="bg-gray-900 hover:bg-black text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-lg flex items-center">{Icons.Edit2 && <Icons.Edit2 size={14} className="mr-2"/>} 批量修改</button></div>
+                            <button onClick={() => setSelectedCigarIds([])} className="ml-auto text-gray-400 hover:text-gray-600 p-1 rounded-full">{Icons.X && <Icons.X size={18}/>}</button>
                         </div>
                     )}
                 </div>
@@ -1418,7 +1622,7 @@
                                             <div><div className="font-bold text-gray-800">{customer}</div><div className="text-xs text-gray-500 mt-1">已消费: ¥{spent.toLocaleString()}</div></div>
                                             <div className="text-right"><div className="text-xs text-gray-400 mb-1">总预存: ¥{deposit.toLocaleString()}</div><div className={`text-sm font-bold ${balance >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>余: ¥{balance.toLocaleString()}</div></div>
                                         </div>
-                                        <div className="px-3 pb-3 flex gap-2 justify-end"><button onClick={() => setViewingLogCustomer(prev => prev === customer ? null : customer)} className="text-xs text-blue-600 hover:underline flex items-center"><History size={12} className="mr-1"/> {isViewingLogs ? '收起记录' : '查看记录'}</button><button onClick={() => handleStartDeposit(customer)} className="text-xs bg-indigo-50 text-indigo-600 px-2 py-1 rounded hover:bg-indigo-100 flex items-center"><Plus size={12} className="mr-1"/> 充值/调整</button></div>
+                                        <div className="px-3 pb-3 flex gap-2 justify-end"><button onClick={() => setViewingLogCustomer(prev => prev === customer ? null : customer)} className="text-xs text-blue-600 hover:underline flex items-center">{Icons.History && <Icons.History size={12} className="mr-1"/>} {isViewingLogs ? '收起记录' : '查看记录'}</button><button onClick={() => handleStartDeposit(customer)} className="text-xs bg-indigo-50 text-indigo-600 px-2 py-1 rounded hover:bg-indigo-100 flex items-center">{Icons.Plus && <Icons.Plus size={12} className="mr-1"/>} 充值/调整</button></div>
                                         {isDepositing && (<div className="px-3 pb-3 bg-indigo-50/50 pt-2 border-t border-indigo-100 animate-in slide-in-from-top-2"><div className="flex gap-2 mb-2"><input type="number" placeholder="金额 (+充值/-扣除)" value={depositForm.amount} onChange={e => setDepositForm({...depositForm, amount: e.target.value})} className="w-1/2 border rounded px-2 py-1 text-sm"/><input type="text" placeholder="备注 (如: 微信转账)" value={depositForm.remark} onChange={e => setDepositForm({...depositForm, remark: e.target.value})} className="w-1/2 border rounded px-2 py-1 text-sm"/></div><div className="flex gap-2"><button onClick={handleConfirmDeposit} className="flex-1 bg-indigo-600 text-white text-xs py-1 rounded">确认提交</button><button onClick={handleCancelDeposit} className="flex-1 bg-gray-300 text-gray-700 text-xs py-1 rounded">取消</button></div></div>)}
                                         {isViewingLogs && (<div className="px-3 pb-3 bg-gray-50 border-t border-gray-100"><ul className="space-y-2 text-xs">{logs.length > 0 ? logs.map(log => (<li key={log.id} className="flex justify-between text-gray-600 border-b border-gray-200 pb-1 last:border-0"><span>{log.date} <span className="text-gray-400">|</span> {log.remark}</span><span className={log.amount >= 0 ? 'text-emerald-600 font-bold' : 'text-rose-600 font-bold'}>{log.amount > 0 ? '+' : ''}{log.amount.toLocaleString()}</span></li>)) : <li className="text-gray-400 text-center">暂无记录</li>}</ul></div>)}
                                     </div>
@@ -1438,15 +1642,20 @@
                         <div><p className="text-blue-200 text-xs font-bold uppercase mb-1">累计净利润</p><h3 className={`text-2xl md:text-3xl font-bold ${loanStats.totalNetProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>¥{Math.round(loanStats.totalNetProfit).toLocaleString()}</h3></div>
                         <div><p className="text-blue-200 text-xs font-bold uppercase mb-1">当前逾期人数</p><h3 className="text-2xl md:text-3xl font-bold text-rose-400">{loanStats.overdueCount} <span className="text-sm font-normal text-blue-200">人</span></h3></div>
                         <div className="flex flex-col justify-between items-start md:items-end">
-                            <div className="flex gap-2">
-                                <label className="bg-white/10 hover:bg-white/20 border border-white/20 text-white px-3 py-1.5 rounded-lg flex items-center transition-all mb-2 text-xs cursor-pointer"><Upload size={14} className="mr-2"/> 导入<input type="file" accept=".csv" className="hidden" onChange={(e) => handleImportCSV(e, 'loans')} /></label>
-                                <button onClick={() => handleExportCSV('loans')} className="bg-white/10 hover:bg-white/20 border border-white/20 text-white px-3 py-1.5 rounded-lg flex items-center transition-all mb-2 text-xs"><Download size={14} className="mr-2"/> 备份</button>
+                            <div className="flex gap-2 w-full md:w-auto">
+                                <label className="bg-white/10 hover:bg-white/20 border border-white/20 text-white px-3 py-2 rounded-lg flex items-center transition-all text-xs cursor-pointer">
+                                    {Icons.Upload && <Icons.Upload size={14} className="mr-2"/>} 导入备份 (含流水)
+                                    <input type="file" accept=".csv" className="hidden" onChange={(e) => handleImportCSV(e)} />
+                                </label>
+                                <button onClick={() => handleExportCSV('loans_merged')} className="bg-white/10 hover:bg-white/20 border border-white/20 text-white px-3 py-2 rounded-lg flex items-center transition-all text-xs">
+                                    {Icons.Download && <Icons.Download size={14} className="mr-2"/>} 导出备份 (含流水)
+                                </button>
                             </div>
-                            <button onClick={() => openLoanModal()} className="bg-white/10 hover:bg-white/20 border border-white/20 text-white px-4 py-2 rounded-lg flex items-center transition-all mb-2 text-sm w-full md:w-auto justify-center"><Plus className="w-4 h-4 mr-2" /> 新增借贷</button><div className="flex items-center text-xs text-blue-200"><input type="checkbox" id="showCompleted" checked={showCompletedLoans} onChange={e => setShowCompletedLoans(e.target.checked)} className="mr-2 rounded border-blue-400" /><label htmlFor="showCompleted" className="cursor-pointer select-none">显示已结清</label></div></div>
+                            <button onClick={() => openLoanModal()} className="bg-white/10 hover:bg-white/20 border border-white/20 text-white px-4 py-2 rounded-lg flex items-center transition-all mt-2 text-sm w-full md:w-auto justify-center">{Icons.Plus && <Icons.Plus className="w-4 h-4 mr-2" />} 新增借贷</button><div className="flex items-center text-xs text-blue-200 mt-1"><input type="checkbox" id="showCompleted" checked={showCompletedLoans} onChange={e => setShowCompletedLoans(e.target.checked)} className="mr-2 rounded border-blue-400" /><label htmlFor="showCompleted" className="cursor-pointer select-none">显示已结清</label></div></div>
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                        {sortedLoans.map(loan => {
+                        {(sortedLoans || []).map(loan => {
                         const isCompleted = loan.status === 'completed';
                         const financials = calculateFinancials(loan);
                         const overdueStats = calculateOverdueStats(loan);
@@ -1454,11 +1663,11 @@
                         return (
                             <div key={loan.id} className={`bg-white rounded-xl shadow-sm border ${isCompleted ? 'border-gray-200 opacity-70' : overdueStats.overduePeriods > 0 ? 'border-rose-200' : 'border-gray-100'} p-6 relative overflow-hidden group hover:shadow-md transition-all`}>
                             <div className={`absolute top-0 left-0 w-1 h-full ${isCompleted ? 'bg-gray-400' : overdueStats.overduePeriods > 0 ? 'bg-rose-500' : 'bg-blue-500'}`}></div>
-                            {isCompleted && <div className="absolute top-2 right-2 flex gap-1 z-10"><button onClick={(e) => { e.stopPropagation(); handleDeleteLoan(loan.id); }} className="text-gray-400 hover:text-rose-500 p-1 rounded-full"><Trash2 size={16}/></button><span className="bg-gray-100 text-gray-500 text-xs px-2 py-1 rounded-full font-bold flex items-center">已结清</span></div>}
+                            {isCompleted && <div className="absolute top-2 right-2 flex gap-1 z-10"><button onClick={(e) => { e.stopPropagation(); handleDeleteLoan(loan.id); }} className="text-gray-400 hover:text-rose-500 p-1 rounded-full">{Icons.Trash2 && <Icons.Trash2 size={16}/>}</button><span className="bg-gray-100 text-gray-500 text-xs px-2 py-1 rounded-full font-bold flex items-center">已结清</span></div>}
                             
                             <div className="flex justify-between items-start mb-2">
                                 <div><h3 className="text-lg font-bold text-gray-800 flex items-center">{loan.borrower}<span className="ml-2 text-xs font-normal text-gray-400 px-2 py-0.5 bg-gray-100 rounded">{loan.interestRate}</span></h3>{loan.guarantor && <p className="text-xs text-gray-500 mt-1">担保人: <span className="font-medium text-gray-700">{loan.guarantor}</span></p>}</div>
-                                {!isCompleted && <div className="flex gap-2 relative z-10"><button onClick={(e) => { e.stopPropagation(); handleDeleteLoan(loan.id); }} className="p-1.5 hover:bg-rose-50 rounded text-gray-400 hover:text-rose-600 transition-colors"><Trash2 size={16}/></button><button onClick={() => openLoanModal(loan)} className="p-1.5 hover:bg-gray-100 rounded text-gray-400 hover:text-indigo-600 transition-colors"><Edit2 size={16}/></button></div>}
+                                {!isCompleted && <div className="flex gap-2 relative z-10"><button onClick={(e) => { e.stopPropagation(); handleDeleteLoan(loan.id); }} className="p-1.5 hover:bg-rose-50 rounded text-gray-400 hover:text-rose-600 transition-colors">{Icons.Trash2 && <Icons.Trash2 size={16}/>}</button><button onClick={() => openLoanModal(loan)} className="p-1.5 hover:bg-gray-100 rounded text-gray-400 hover:text-indigo-600 transition-colors">{Icons.Edit2 && <Icons.Edit2 size={16}/>}</button></div>}
                             </div>
                             
                             <div className="bg-gray-50 rounded-lg p-3 mb-4 space-y-2">
@@ -1471,7 +1680,7 @@
                                 <div className="flex justify-between items-center bg-indigo-50 px-2 py-1.5 rounded"><span className="text-indigo-600">资金成本 ({loan.costRate || '0%'})</span><span className="font-medium text-indigo-700">- ¥{Math.round(financials.cumulativeCost).toLocaleString()}</span></div>
                                 <div className="flex justify-between items-center px-2 py-1.5 border-t border-gray-100 mt-1"><span className="font-bold text-gray-600">净收益</span><span className={`font-bold ${financials.netProfit >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>¥{Math.round(financials.netProfit).toLocaleString()}</span></div>
                             </div>
-                            <button onClick={() => setActiveLoanDetail(loan)} className="w-full bg-white border border-gray-200 hover:bg-blue-50 hover:border-blue-200 hover:text-blue-700 text-gray-600 py-2.5 rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-2"><FileText size={16}/> 查看详情 / 资金操作</button>
+                            <button onClick={() => setActiveLoanDetail(loan)} className="w-full bg-white border border-gray-200 hover:bg-blue-50 hover:border-blue-200 hover:text-blue-700 text-gray-600 py-2.5 rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-2">{Icons.FileText && <Icons.FileText size={16}/>} 查看详情 / 资金操作</button>
                             </div>
                         );
                         })}
@@ -1502,7 +1711,7 @@
                         <div className="grid grid-cols-2 gap-4"><input type="date" value={cigarForm.date} onChange={e => setCigarForm({...cigarForm, date: e.target.value})} className="border p-2 rounded"/><input type="text" placeholder="客户" value={cigarForm.customer} onChange={e => setCigarForm({...cigarForm, customer: e.target.value})} className="border p-2 rounded"/></div>
                         {cigarForm.items.map((item, idx) => (
                             <div key={idx} className="border p-2 rounded relative bg-gray-50">
-                                {cigarForm.items.length > 1 && <button type="button" onClick={() => removeCigarItemRow(idx)} className="absolute top-1 right-1 text-red-500"><X size={14}/></button>}
+                                {cigarForm.items.length > 1 && <button type="button" onClick={() => removeCigarItemRow(idx)} className="absolute top-1 right-1 text-red-500">{Icons.X && <Icons.X size={14}/>}</button>}
                                 <input type="text" placeholder="产品" value={item.product} onChange={e => updateCigarItemRow(idx, 'product', e.target.value)} className="w-full border p-1 mb-1 rounded"/>
                                 <div className="flex gap-2"><input type="number" placeholder="数量" value={item.quantity} onChange={e => updateCigarItemRow(idx, 'quantity', e.target.value)} className="w-1/2 border p-1 rounded"/><input type="number" placeholder="单价" value={item.unitPrice} onChange={e => updateCigarItemRow(idx, 'unitPrice', e.target.value)} className="w-1/2 border p-1 rounded"/></div>
                             </div>
@@ -1532,7 +1741,7 @@
                         <form onSubmit={handleSaveLoan} className="space-y-4">
                         <div className="grid grid-cols-2 gap-4"><div><label className="block text-sm">借款人</label><input type="text" required value={loanForm.borrower} onChange={e => setLoanForm({...loanForm, borrower: e.target.value})} className="w-full p-2 border rounded"/></div><div><label className="block text-sm">担保人</label><input type="text" value={loanForm.guarantor} onChange={e => setLoanForm({...loanForm, guarantor: e.target.value})} className="w-full p-2 border rounded"/></div></div>
                         <div><label className="block text-sm">电话</label><input type="text" value={loanForm.phone} onChange={e => setLoanForm({...loanForm, phone: e.target.value})} className="w-full p-2 border rounded"/></div>
-                        <div className="grid grid-cols-2 gap-4"><div><label className="block text-sm">本金</label><input type="number" required value={loanForm.totalPrincipal} onChange={e => setLoanForm({...loanForm, totalPrincipal: e.target.value})} className="w-full p-2 border rounded"/></div><div><label className="block text-sm">利率</label><input type="text" required value={loanForm.interestRate} onChange={e => setLoanForm({...loanForm, interestRate: e.target.value})} className="w-full p-2 border rounded"/></div></div>
+                        <div className="grid grid-cols-2 gap-4"><div><label className="block text-sm">本金</label><input type="number" required value={loanForm.totalPrincipal} onChange={e => setLoanForm({...loanForm, totalPrincipal: e.target.value})} disabled={!!activeEditItem} className={`w-full p-2 border rounded ${activeEditItem ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''}`} placeholder={activeEditItem ? "请通过新增流水修改" : "初始本金"}/></div><div><label className="block text-sm">利率</label><input type="text" required value={loanForm.interestRate} onChange={e => setLoanForm({...loanForm, interestRate: e.target.value})} className="w-full p-2 border rounded"/></div></div>
                         <div className="grid grid-cols-2 gap-4"><div><label className="block text-sm">起息日</label><input type="date" required value={loanForm.startDate} onChange={e => setLoanForm({...loanForm, startDate: e.target.value})} className="w-full p-2 border rounded"/></div><div><label className="block text-sm">资金成本</label><input type="text" placeholder="如 1.5%" value={loanForm.costRate} onChange={e => setLoanForm({...loanForm, costRate: e.target.value})} className="w-full p-2 border rounded"/></div></div>
                         <div><label className="block text-sm text-amber-600">下次付息日</label><input type="date" value={loanForm.nextPayDate} onChange={e => setLoanForm({...loanForm, nextPayDate: e.target.value})} className="w-full p-2 border border-amber-200 rounded"/></div>
                         <button type="submit" className="w-full bg-blue-600 text-white py-2 rounded">保存档案</button>
@@ -1543,20 +1752,20 @@
                         {activeLoanDetail && (
                             <div className="space-y-6">
                                 <div className="bg-gray-50 p-4 rounded-xl flex justify-between items-center text-sm"><div><span className="text-gray-500 block text-xs">剩余本金</span><span className="font-bold text-2xl">¥{Number(activeLoanDetail.totalPrincipal).toLocaleString()}</span></div><div className="text-right"><span className="text-gray-500 block text-xs">下次应付</span><span className="font-bold text-emerald-600 text-lg">{activeLoanDetail.status === 'completed' ? '已结清' : (activeLoanDetail.nextPayDate || activeLoanDetail.startDate)}</span></div></div>
-                                {activeLoanDetail.status !== 'completed' && (<form onSubmit={handleAddRepayment} className="border p-4 rounded-xl space-y-3 bg-white"><p className="text-sm font-bold flex items-center"><Plus size={16}/> 新增流水</p><div className="grid grid-cols-3 gap-2"><select value={repayForm.type} onChange={e => setRepayForm({...repayForm, type: e.target.value})} className="border p-2 rounded text-sm"><option value="interest">利息</option><option value="principal">还本</option><option value="lend">放款</option></select><input type="number" required placeholder="金额" value={repayForm.amount} onChange={e => setRepayForm({...repayForm, amount: e.target.value})} className="col-span-2 border p-2 rounded text-sm" /></div><div className="flex gap-2"><input type="date" required value={repayForm.date} onChange={e => setRepayForm({...repayForm, date: e.target.value})} className="w-1/3 border p-2 rounded text-sm"/><input type="text" placeholder="备注" value={repayForm.remark} onChange={e => setRepayForm({...repayForm, remark: e.target.value})} className="flex-1 border p-2 rounded text-sm"/></div>{repayForm.type === 'interest' && <div className="flex items-center gap-2 text-xs bg-emerald-50 p-2 rounded"><input type="checkbox" checked={repayForm.isFullPeriodPayment} onChange={e => setRepayForm({...repayForm, isFullPeriodPayment: e.target.checked})}/> <label>结清当期? (推迟付息日)</label></div>}<button type="submit" className="w-full bg-indigo-600 text-white py-2 rounded text-sm">提交</button></form>)}
-                                {activeLoanDetail.status !== 'completed' && (<button onClick={handleArchiveLoan} className="w-full py-2 bg-gray-100 text-gray-600 rounded text-sm flex justify-center items-center gap-2"><Archive size={16}/> 结清并归档</button>)}
-                                <div className="border-t pt-2 max-h-[250px] overflow-y-auto">{activeLoanDetail.transactions.map(t => (<div key={t.id} className="flex justify-between items-center py-2 border-b last:border-0 group">{editingTxId === t.id ? (<div className="w-full bg-blue-50 p-2 rounded space-y-2"><div className="flex gap-2"><input type="date" value={editTxForm.date} onChange={e => setEditTxForm({...editTxForm, date: e.target.value})} className="text-xs border p-1 rounded"/><input type="text" value={editTxForm.amount} onChange={e => setEditTxForm({...editTxForm, amount: e.target.value})} className="text-xs border p-1 rounded w-20"/></div><div className="flex gap-2"><button onClick={saveEditTransaction} className="text-xs bg-blue-600 text-white px-2 rounded">保存</button><button onClick={() => setEditingTxId(null)} className="text-xs bg-gray-300 px-2 rounded">取消</button></div></div>) : (<><div><div className="text-xs text-gray-500">{t.date} <span className={`px-1 rounded ${t.type==='interest'?'bg-emerald-100':'bg-blue-100'}`}>{t.typeName}</span></div><div className="text-sm text-gray-800">{t.remark}</div></div><div className="text-right"><div className="font-bold">¥{Number(t.amount).toLocaleString()}</div>{activeLoanDetail.status !== 'completed' && (<div className="flex gap-2 justify-end md:opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={() => startEditTransaction(t)} className="text-blue-400 p-1"><Edit2 size={12}/></button><button onClick={() => deleteTransaction(t.id)} className="text-red-400 p-1"><Trash2 size={12}/></button></div>)}</div></>)}</div>))}</div>
+                                {activeLoanDetail.status !== 'completed' && (<form onSubmit={handleAddRepayment} className="border p-4 rounded-xl space-y-3 bg-white"><p className="text-sm font-bold flex items-center">{Icons.Plus && <Icons.Plus size={16}/>} 新增流水</p><div className="grid grid-cols-3 gap-2"><select value={repayForm.type} onChange={e => setRepayForm({...repayForm, type: e.target.value})} className="border p-2 rounded text-sm"><option value="interest">利息</option><option value="principal">还本</option><option value="lend">放款</option></select><input type="number" required placeholder="金额" value={repayForm.amount} onChange={e => setRepayForm({...repayForm, amount: e.target.value})} className="col-span-2 border p-2 rounded text-sm" /></div><div className="flex gap-2"><input type="date" required value={repayForm.date} onChange={e => setRepayForm({...repayForm, date: e.target.value})} className="w-1/3 border p-2 rounded text-sm"/><input type="text" placeholder="备注" value={repayForm.remark} onChange={e => setRepayForm({...repayForm, remark: e.target.value})} className="flex-1 border p-2 rounded text-sm"/></div>{repayForm.type === 'interest' && <div className="flex items-center gap-2 text-xs bg-emerald-50 p-2 rounded"><input type="checkbox" checked={repayForm.isFullPeriodPayment} onChange={e => setRepayForm({...repayForm, isFullPeriodPayment: e.target.checked})}/> <label>结清当期? (推迟付息日)</label></div>}<button type="submit" className="w-full bg-indigo-600 text-white py-2 rounded text-sm">提交</button></form>)}
+                                {activeLoanDetail.status !== 'completed' && (<button onClick={handleArchiveLoan} className="w-full py-2 bg-gray-100 text-gray-600 rounded text-sm flex justify-center items-center gap-2">{Icons.Archive && <Icons.Archive size={16}/>} 结清并归档</button>)}
+                                <div className="border-t pt-2 max-h-[250px] overflow-y-auto">{(activeLoanDetail.transactions || []).map(t => (<div key={t.id} className="flex justify-between items-center py-2 border-b last:border-0 group">{editingTxId === t.id ? (<div className="w-full bg-blue-50 p-2 rounded space-y-2"><div className="flex gap-2"><input type="date" value={editTxForm.date} onChange={e => setEditTxForm({...editTxForm, date: e.target.value})} className="text-xs border p-1 rounded"/><input type="text" value={editTxForm.amount} onChange={e => setEditTxForm({...editTxForm, amount: e.target.value})} className="text-xs border p-1 rounded w-20"/></div><div className="flex gap-2"><button onClick={saveEditTransaction} className="text-xs bg-blue-600 text-white px-2 rounded">保存</button><button onClick={() => setEditingTxId(null)} className="text-xs bg-gray-300 px-2 rounded">取消</button></div></div>) : (<><div><div className="text-xs text-gray-500">{t.date} <span className={`px-1 rounded ${t.type==='interest'?'bg-emerald-100':'bg-blue-100'}`}>{t.typeName}</span></div><div className="text-sm text-gray-800">{t.remark}</div></div><div className="text-right"><div className="font-bold">¥{Number(t.amount).toLocaleString()}</div>{activeLoanDetail.status !== 'completed' && (<div className="flex gap-2 justify-end md:opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={() => startEditTransaction(t)} className="text-blue-400 p-1">{Icons.Edit2 && <Icons.Edit2 size={12}/>}</button><button onClick={() => deleteTransaction(t.id)} className="text-red-400 p-1">{Icons.Trash2 && <Icons.Trash2 size={12}/>}</button></div>)}</div></>)}</div>))}</div>
                             </div>
                         )}
                     </Modal>
 
                     {/* 侧边栏 (桌面端) */}
                     <aside className="w-64 bg-white border-r hidden md:flex flex-col flex-shrink-0">
-                        <div className="p-6 border-b flex items-center gap-2 font-bold text-xl text-indigo-700"><LayoutDashboard/> 业务看板</div>
+                        <div className="p-6 border-b flex items-center gap-2 font-bold text-xl text-indigo-700">{Icons.LayoutDashboard && <Icons.LayoutDashboard/>} 业务看板</div>
                         <nav className="p-4 space-y-2">
-                        {[{id:'dashboard', icon:LayoutDashboard, label:'总览'}, {id:'accounts', icon:Wallet, label:'账目'}, {id:'cigars', icon:Cigarette, label:'雪茄'}, {id:'loans', icon:Banknote, label:'借贷'}].map(tab => (
+                        {[{id:'dashboard', icon:Icons.LayoutDashboard || Icons.Box, label:'总览'}, {id:'accounts', icon:Icons.Wallet || Icons.Box, label:'账目'}, {id:'cigars', icon:Icons.Cigarette || Icons.Box, label:'雪茄'}, {id:'loans', icon:Icons.Banknote || Icons.Box, label:'借贷'}].map(tab => (
                             <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`w-full flex items-center gap-3 px-4 py-3 rounded ${activeTab === tab.id ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'}`}>
-                            <tab.icon size={20}/> {tab.label}
+                            {tab.icon && <tab.icon size={20}/>} {tab.label}
                             </button>
                         ))}
                         </nav>
@@ -1564,9 +1773,9 @@
 
                     {/* 底部导航 (手机端 - 新增) */}
                     <nav className="md:hidden fixed bottom-0 left-0 w-full bg-white border-t border-gray-200 z-40 flex justify-around pb-safe">
-                        {[{id:'dashboard', icon:LayoutDashboard, label:'总览'}, {id:'accounts', icon:Wallet, label:'账目'}, {id:'cigars', icon:Cigarette, label:'雪茄'}, {id:'loans', icon:Banknote, label:'借贷'}].map(tab => (
+                        {[{id:'dashboard', icon:Icons.LayoutDashboard || Icons.Box, label:'总览'}, {id:'accounts', icon:Icons.Wallet || Icons.Box, label:'账目'}, {id:'cigars', icon:Icons.Cigarette || Icons.Box, label:'雪茄'}, {id:'loans', icon:Icons.Banknote || Icons.Box, label:'借贷'}].map(tab => (
                             <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex flex-col items-center justify-center w-full py-3 ${activeTab === tab.id ? 'text-indigo-600' : 'text-gray-400'}`}>
-                                <tab.icon size={20} className={activeTab === tab.id ? 'mb-1' : 'mb-1 opacity-70'}/>
+                                {tab.icon && <tab.icon size={20} className={activeTab === tab.id ? 'mb-1' : 'mb-1 opacity-70'}/>}
                                 <span className="text-[10px] font-medium">{tab.label}</span>
                             </button>
                         ))}
