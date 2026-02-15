@@ -171,6 +171,8 @@
 
             const daysInTargetMonth = new Date(targetYear, targetMonth + 1, 0).getDate();
             const finalDay = Math.min(anchorDay, daysInTargetMonth);
+            
+            // 修复：补全了此处之前丢失的代码
             const nextDate = new Date(targetYear, targetMonth, finalDay);
             
             const y = nextDate.getFullYear();
@@ -180,22 +182,42 @@
             return `${y}-${m}-${d}`;
         };
 
-        // 防御性编程：确保 transactions 存在
+        // 【核心修改】本金计算逻辑修正：支持“期初预收”模式 + 修复时间精度Bug
+        // checkDate: 结算日/付息日
         const getPrincipalAtDate = (loan, checkDate) => {
             let currentPrincipal = Number(loan.initialPrincipal);
             if (!currentPrincipal && currentPrincipal !== 0) currentPrincipal = Number(loan.totalPrincipal);
 
             const txs = loan.transactions || [];
+            // 按日期排序确保顺序正确
             const sortedTx = [...txs].sort((a, b) => new Date(a.date) - new Date(b.date));
 
-            for (const t of sortedTx) {
-                const tDate = new Date(t.date);
-                if (tDate > checkDate) break;
+            // 【关键修复】确保 checkDate 是当天的 00:00:00，消除时分秒影响
+            const checkTimeObj = new Date(checkDate);
+            checkTimeObj.setHours(0, 0, 0, 0);
+            const checkTime = checkTimeObj.getTime();
 
-                if (t.type === 'principal') {
-                currentPrincipal -= Number(t.amount);
-                } else if (t.type === 'lend') {
-                currentPrincipal += Number(t.amount);
+            for (const t of sortedTx) {
+                // 【关键修复】将流水的日期也强制转为当天的 00:00:00
+                // 解决 "2026-02-04 08:00" > "2026-02-04 00:00" 导致当天放款不被计入的问题
+                let tDate = new Date(t.date);
+                // 处理可能得时区偏移，确保只看年月日
+                // 这里使用 setHours 归零
+                tDate.setHours(0, 0, 0, 0);
+                const tTime = tDate.getTime();
+
+                if (t.type === 'lend') {
+                    // 放款：只要日期 <= 结算日，就算入本金（当天借的钱，当天有效）
+                    // 修复后：2月4日放款(00:00) <= 2月4日结算(00:00) -> TRUE
+                    if (tTime <= checkTime) {
+                        currentPrincipal += Number(t.amount);
+                    }
+                } else if (t.type === 'principal') {
+                    // 还本：日期 < 结算日 才扣除。
+                    // 期初预收原则：如果还款发生在结算日当天（tTime == checkTime），不扣除。
+                    if (tTime < checkTime) {
+                        currentPrincipal -= Number(t.amount);
+                    }
                 }
             }
             return currentPrincipal;
@@ -213,18 +235,29 @@
             let totalExpectedInterest = 0;
             let billingCycles = 0; 
 
+            // 游标从“起息日”开始
             let cursor = new Date(startDate);
             
+            // 【修改1：期初预收模式】
+            // 只要周期开始日（cursor）小于等于今天，这期利息就算作“应付/已产生”。
             while (cursor <= today) {
                 billingCycles++;
-                const principalAtCycle = getPrincipalAtDate(loan, cursor);
-                if (principalAtCycle > 0) {
-                    totalExpectedInterest += principalAtCycle * rate;
-                }
                 
                 const nextDateStr = calculateNextPayDate(cursor.toISOString(), loan.startDate);
-                cursor = new Date(nextDateStr);
-                cursor.setHours(0,0,0,0);
+                const nextDate = new Date(nextDateStr);
+                nextDate.setHours(0,0,0,0);
+
+                // 【修改2：本金取值】使用 cursor (周期开始日)
+                // 结合 getPrincipalAtDate 的修改，这里会取到“当天期初”的本金。
+                // 即：忽略 cursor 当天发生的还款，但包含 cursor 当天发生的放款。
+                const principalAtCycleStart = getPrincipalAtDate(loan, cursor);
+                
+                if (principalAtCycleStart > 0) {
+                    totalExpectedInterest += principalAtCycleStart * rate;
+                }
+                
+                // 推进到下一个周期
+                cursor = nextDate;
             }
 
             const txs = loan.transactions || [];
@@ -1018,7 +1051,7 @@
                 setConfirmModal({
                 isOpen: true,
                 title: '删除档案',
-                message: '确定要彻底删除该借贷档案吗？\n删除后将不可恢复。',
+                message: '确定要删除该借贷档案吗？\n删除后将不可恢复。',
                 onConfirm: () => {
                     setLoans(prev => prev.filter(l => l.id !== loanId));
                     if (activeLoanDetail && activeLoanDetail.id === loanId) {
@@ -1739,12 +1772,12 @@
 
                     <Modal isOpen={isLoanModalOpen} onClose={() => setIsLoanModalOpen(false)} title={activeEditItem ? "编辑借贷档案" : "新建借贷档案"}>
                         <form onSubmit={handleSaveLoan} className="space-y-4">
-                        <div className="grid grid-cols-2 gap-4"><div><label className="block text-sm">借款人</label><input type="text" required value={loanForm.borrower} onChange={e => setLoanForm({...loanForm, borrower: e.target.value})} className="w-full p-2 border rounded"/></div><div><label className="block text-sm">担保人</label><input type="text" value={loanForm.guarantor} onChange={e => setLoanForm({...loanForm, guarantor: e.target.value})} className="w-full p-2 border rounded"/></div></div>
-                        <div><label className="block text-sm">电话</label><input type="text" value={loanForm.phone} onChange={e => setLoanForm({...loanForm, phone: e.target.value})} className="w-full p-2 border rounded"/></div>
-                        <div className="grid grid-cols-2 gap-4"><div><label className="block text-sm">本金</label><input type="number" required value={loanForm.totalPrincipal} onChange={e => setLoanForm({...loanForm, totalPrincipal: e.target.value})} disabled={!!activeEditItem} className={`w-full p-2 border rounded ${activeEditItem ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''}`} placeholder={activeEditItem ? "请通过新增流水修改" : "初始本金"}/></div><div><label className="block text-sm">利率</label><input type="text" required value={loanForm.interestRate} onChange={e => setLoanForm({...loanForm, interestRate: e.target.value})} className="w-full p-2 border rounded"/></div></div>
-                        <div className="grid grid-cols-2 gap-4"><div><label className="block text-sm">起息日</label><input type="date" required value={loanForm.startDate} onChange={e => setLoanForm({...loanForm, startDate: e.target.value})} className="w-full p-2 border rounded"/></div><div><label className="block text-sm">资金成本</label><input type="text" placeholder="如 1.5%" value={loanForm.costRate} onChange={e => setLoanForm({...loanForm, costRate: e.target.value})} className="w-full p-2 border rounded"/></div></div>
-                        <div><label className="block text-sm text-amber-600">下次付息日</label><input type="date" value={loanForm.nextPayDate} onChange={e => setLoanForm({...loanForm, nextPayDate: e.target.value})} className="w-full p-2 border border-amber-200 rounded"/></div>
-                        <button type="submit" className="w-full bg-blue-600 text-white py-2 rounded">保存档案</button>
+                        <div className="grid grid-cols-2 gap-4"><div><label className="block text-sm">借款人</label><input type="text" required value={loanForm.borrower} onChange={e => setLoanForm({...loanForm, borrower: e.target.value})} className="w-full p-2 border rounded-lg"/></div><div><label className="block text-sm">担保人</label><input type="text" value={loanForm.guarantor} onChange={e => setLoanForm({...loanForm, guarantor: e.target.value})} className="w-full p-2 border rounded-lg"/></div></div>
+                        <div><label className="block text-sm">电话</label><input type="text" value={loanForm.phone} onChange={e => setLoanForm({...loanForm, phone: e.target.value})} className="w-full p-2 border rounded-lg"/></div>
+                        <div className="grid grid-cols-2 gap-4"><div><label className="block text-sm">本金</label><input type="number" required value={loanForm.totalPrincipal} onChange={e => setLoanForm({...loanForm, totalPrincipal: e.target.value})} disabled={!!activeEditItem} className={`w-full p-2 border rounded-lg ${activeEditItem ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''}`} placeholder={activeEditItem ? "请通过新增流水修改" : "初始本金"}/></div><div><label className="block text-sm">利率</label><input type="text" required value={loanForm.interestRate} onChange={e => setLoanForm({...loanForm, interestRate: e.target.value})} className="w-full p-2 border rounded-lg"/></div></div>
+                        <div className="grid grid-cols-2 gap-4"><div><label className="block text-sm">起息日</label><input type="date" required value={loanForm.startDate} onChange={e => setLoanForm({...loanForm, startDate: e.target.value})} className="w-full p-2 border rounded-lg"/></div><div><label className="block text-sm">资金成本</label><input type="text" placeholder="如 1.5%" value={loanForm.costRate} onChange={e => setLoanForm({...loanForm, costRate: e.target.value})} className="w-full p-2 border rounded-lg"/></div></div>
+                        <div><label className="block text-sm text-amber-600">下次付息日</label><input type="date" value={loanForm.nextPayDate} onChange={e => setLoanForm({...loanForm, nextPayDate: e.target.value})} className="w-full p-2 border border-amber-200 rounded-lg"/></div>
+                        <button type="submit" className="w-full bg-blue-600 text-white py-2 rounded-lg">保存档案</button>
                         </form>
                     </Modal>
 
