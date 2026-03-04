@@ -525,6 +525,11 @@
             const [showCompletedLoans, setShowCompletedLoans] = useState(false);
 
             const [selectedCigarIds, setSelectedCigarIds] = useState([]);
+            // 【新增】借贷多选状态
+            const [selectedLoanIds, setSelectedLoanIds] = useState([]);
+            // 【新增】账目多选状态
+            const [selectedAccountIds, setSelectedAccountIds] = useState([]);
+
             const [showArchivedCigars, setShowArchivedCigars] = useState(false); 
             const [cigarMonth, setCigarMonth] = useState(new Date().toISOString().slice(0, 7)); 
             const [isBatchCigarModalOpen, setIsBatchCigarModalOpen] = useState(false); 
@@ -650,15 +655,19 @@
 
                 let overdueCount = 0;
                 let dueSoonCount = 0; 
+                let totalOverdueAmount = 0; // 新增：累计欠付利息总额
 
                 activeLoans.forEach(loan => {
                 const overdueStats = calculateOverdueStats(loan);
-                if (overdueStats.overduePeriods > 0) overdueCount++;
+                if (overdueStats.overduePeriods > 0) {
+                    overdueCount++;
+                    totalOverdueAmount += overdueStats.overdueAmount; // 累加欠付金额
+                }
                 const { days } = getInterestCountdown(loan.nextPayDate);
                 if (overdueStats.overduePeriods === 0 && days <= 7) dueSoonCount++;
                 });
 
-                return { totalPrincipal, totalNetProfit, overdueCount, dueSoonCount };
+                return { totalPrincipal, totalNetProfit, overdueCount, dueSoonCount, totalOverdueAmount };
             }, [loans]);
 
             const dashboardStats = useMemo(() => {
@@ -1140,6 +1149,73 @@
                 setSelectedCigarIds([]);
             };
 
+            const handleBatchDeleteCigar = () => {
+                setConfirmModal({
+                    isOpen: true,
+                    title: '批量删除',
+                    message: `确定要删除选中的 ${selectedCigarIds.length} 条订单吗？\n删除后不可恢复。`,
+                    onConfirm: () => {
+                        setCigars(prev => prev.filter(c => !selectedCigarIds.includes(c.id)));
+                        setSelectedCigarIds([]);
+                    }
+                });
+            };
+
+            // 【新增】借贷多选逻辑
+            const handleToggleSelectLoan = (id) => {
+                setSelectedLoanIds(prev => prev.includes(id) ? prev.filter(lid => lid !== id) : [...prev, id]);
+            };
+
+            const handleSelectAllLoans = () => {
+                const visibleIds = sortedLoans.map(l => l.id);
+                if (selectedLoanIds.length === visibleIds.length) {
+                    setSelectedLoanIds([]);
+                } else {
+                    setSelectedLoanIds(visibleIds);
+                }
+            };
+
+            const handleBatchDeleteLoan = () => {
+                setConfirmModal({
+                    isOpen: true,
+                    title: '批量删除',
+                    message: `确定要删除选中的 ${selectedLoanIds.length} 个借贷档案吗？\n删除后不可恢复。`,
+                    onConfirm: () => {
+                        setLoans(prev => prev.filter(l => !selectedLoanIds.includes(l.id)));
+                        setSelectedLoanIds([]);
+                        if (activeLoanDetail && selectedLoanIds.includes(activeLoanDetail.id)) {
+                            setActiveLoanDetail(null);
+                        }
+                    }
+                });
+            };
+
+            // 【新增】账目多选逻辑
+            const handleToggleSelectAccount = (id) => {
+                setSelectedAccountIds(prev => prev.includes(id) ? prev.filter(aid => aid !== id) : [...prev, id]);
+            };
+
+            const handleSelectAllAccounts = () => {
+                const visibleIds = accountsWithBalance.map(a => a.id);
+                if (selectedAccountIds.length === visibleIds.length) {
+                    setSelectedAccountIds([]);
+                } else {
+                    setSelectedAccountIds(visibleIds);
+                }
+            };
+
+            const handleBatchDeleteAccounts = () => {
+                setConfirmModal({
+                    isOpen: true,
+                    title: '批量删除',
+                    message: `确定要删除选中的 ${selectedAccountIds.length} 条账目记录吗？\n删除后不可恢复。`,
+                    onConfirm: () => {
+                        setAccounts(prev => prev.filter(a => !selectedAccountIds.includes(a.id)));
+                        setSelectedAccountIds([]);
+                    }
+                });
+            };
+
             const openCigarModal = (item = null) => {
                 if (item) { 
                     setActiveEditItem(item); 
@@ -1456,53 +1532,58 @@
                 const todayStr = new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
 
                 return (
-                <div className="space-y-6 pb-20">
-                    <div className="flex justify-between items-end">
-                    <p className="text-gray-500 text-sm">以下是您所有业务模块的实时概览</p>
-                    <p className="text-gray-400 text-sm font-medium bg-gray-100 px-3 py-1 rounded-full text-xs">{todayStr}</p>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <Card onClick={() => setActiveTab('accounts')} title="账目资金池" value={`¥${dashboardStats.balance.toLocaleString()}`} subtext="当前流动余额" icon={Icons.Wallet || Icons.Box} colorClass="text-emerald-600"/>
-                    <Card onClick={() => setActiveTab('loans')} title="利息业务 - 当月" value={`${loanStats.dueSoonCount} 人临期`} subtext={`${loanStats.overdueCount} 人逾期 | 共 ${(loans || []).filter(l => l.status === 'active').length} 笔未结清`} icon={Icons.Banknote || Icons.Box} colorClass="text-blue-600" highlight={loanStats.overdueCount > 0}/>
-                    <Card onClick={() => setActiveTab('cigars')} title="雪茄待处理" value={cigars.filter(c => c.status !== '已交割').length} subtext="待发货 / 运输中" icon={Icons.Truck || Icons.Box} colorClass="text-amber-600"/>
-                    </div>
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    <div onClick={() => setActiveTab('cigars')} className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 cursor-pointer hover:shadow-md transition-all group">
-                        <div className="flex justify-between items-center mb-4"><h3 className="text-lg font-bold text-gray-800 flex items-center group-hover:text-amber-600 transition-colors">{Icons.Package && <Icons.Package className="w-5 h-5 mr-2 text-amber-600" />}最新雪茄订单</h3><span className="text-xs text-amber-600 hover:underline">查看全部</span></div>
-                        <div className="space-y-3">{cigars.slice(-5).reverse().map(item => (<div key={item.id} className="flex justify-between items-center p-3 hover:bg-gray-50 rounded-lg transition-colors border border-gray-50"><div><p className="font-medium text-gray-800 text-sm">{item.product}</p><p className="text-xs text-gray-500">{item.customer} | {item.date}</p></div><Badge type={item.status === '已交割' ? 'success' : item.status === '待发货' ? 'warning' : 'info'}>{item.status}</Badge></div>))}</div>
-                    </div>
-                    <div onClick={() => setActiveTab('loans')} className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 cursor-pointer hover:shadow-md transition-all group">
-                        <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center group-hover:text-blue-600 transition-colors">{Icons.AlertCircle && <Icons.AlertCircle className="w-5 h-5 mr-2 text-rose-500" />}利息逾期/临期 (未结清)</h3>
-                        <div className="space-y-3">
-                        {criticalList.length === 0 ? (
-                            <p className="text-gray-400 text-sm text-center py-4">暂无临期或逾期记录</p>
-                        ) : (
-                            criticalList.map((item) => (
-                            <div key={item.loan.id} className={`flex justify-between items-center p-3 rounded-lg border ${item.type === 'overdue' ? 'bg-rose-50 border-rose-100' : 'bg-amber-50 border-amber-100'}`}>
-                                <div>
-                                <p className="font-bold text-gray-800">{item.loan.borrower}</p>
-                                <p className="text-xs text-gray-500">本金: ¥{Number(item.loan.totalPrincipal).toLocaleString()}</p>
-                                </div>
-                                <div className="text-right">
-                                <span className={`block font-bold ${item.type === 'overdue' ? 'text-rose-600' : 'text-amber-600'}`}>
-                                    ¥{item.displayAmount.toLocaleString()}
-                                </span>
-                                <span className={`text-xs ${item.type === 'overdue' ? 'text-rose-500' : 'text-amber-500'}`}>
-                                    {item.countdown.text}
-                                </span>
-                                </div>
-                            </div>
-                            ))
-                        )}
+                <div className="flex flex-col h-[80vh] relative">
+                    <div className="flex-1 overflow-y-auto space-y-6 pb-24 pr-1 no-scrollbar">
+                        <div className="flex justify-between items-end">
+                        <p className="text-gray-500 text-sm">以下是您所有业务模块的实时概览</p>
+                        <p className="text-gray-400 text-sm font-medium bg-gray-100 px-3 py-1 rounded-full text-xs">{todayStr}</p>
                         </div>
-                    </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <Card onClick={() => setActiveTab('accounts')} title="账目资金池" value={`¥${dashboardStats.balance.toLocaleString()}`} subtext="当前流动余额" icon={Icons.Wallet || Icons.Box} colorClass="text-emerald-600"/>
+                        <Card onClick={() => setActiveTab('loans')} title="利息业务 - 当月" value={`${loanStats.dueSoonCount} 人临期`} subtext={`${loanStats.overdueCount} 人逾期 | 共 ${(loans || []).filter(l => l.status === 'active').length} 笔未结清`} icon={Icons.Banknote || Icons.Box} colorClass="text-blue-600" highlight={loanStats.overdueCount > 0}/>
+                        <Card onClick={() => setActiveTab('cigars')} title="雪茄待处理" value={cigars.filter(c => c.status !== '已交割').length} subtext="待发货 / 运输中" icon={Icons.Truck || Icons.Box} colorClass="text-amber-600"/>
+                        </div>
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <div onClick={() => setActiveTab('cigars')} className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 cursor-pointer hover:shadow-md transition-all group">
+                            <div className="flex justify-between items-center mb-4"><h3 className="text-lg font-bold text-gray-800 flex items-center group-hover:text-amber-600 transition-colors">{Icons.Package && <Icons.Package className="w-5 h-5 mr-2 text-amber-600" />}最新雪茄订单</h3><span className="text-xs text-amber-600 hover:underline">查看全部</span></div>
+                            <div className="space-y-3">{cigars.slice(-5).reverse().map(item => (<div key={item.id} className="flex justify-between items-center p-3 hover:bg-gray-50 rounded-lg transition-colors border border-gray-50"><div><p className="font-medium text-gray-800 text-sm">{item.product}</p><p className="text-xs text-gray-500">{item.customer} | {item.date}</p></div><Badge type={item.status === '已交割' ? 'success' : item.status === '待发货' ? 'warning' : 'info'}>{item.status}</Badge></div>))}</div>
+                        </div>
+                        <div onClick={() => setActiveTab('loans')} className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 cursor-pointer hover:shadow-md transition-all group">
+                            <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center group-hover:text-blue-600 transition-colors">{Icons.AlertCircle && <Icons.AlertCircle className="w-5 h-5 mr-2 text-rose-500" />}利息逾期/临期 (未结清)</h3>
+                            <div className="space-y-3">
+                            {criticalList.length === 0 ? (
+                                <p className="text-gray-400 text-sm text-center py-4">暂无临期或逾期记录</p>
+                            ) : (
+                                criticalList.map((item) => (
+                                <div key={item.loan.id} className={`flex justify-between items-center p-3 rounded-lg border ${item.type === 'overdue' ? 'bg-rose-50 border-rose-100' : 'bg-amber-50 border-amber-100'}`}>
+                                    <div>
+                                    <p className="font-bold text-gray-800">{item.loan.borrower}</p>
+                                    <p className="text-xs text-gray-500">本金: ¥{Number(item.loan.totalPrincipal).toLocaleString()}</p>
+                                    </div>
+                                    <div className="text-right">
+                                    <span className={`block font-bold ${item.type === 'overdue' ? 'text-rose-600' : 'text-amber-600'}`}>
+                                        ¥{item.displayAmount.toLocaleString()}
+                                    </span>
+                                    <span className={`text-xs ${item.type === 'overdue' ? 'text-rose-500' : 'text-amber-500'}`}>
+                                        {item.countdown.text}
+                                    </span>
+                                    </div>
+                                </div>
+                                ))
+                            )}
+                            </div>
+                        </div>
+                        </div>
                     </div>
                 </div>
                 );
             };
 
-            const renderAccounts = () => (
+            const renderAccounts = () => {
+                const isAllSelected = accountsWithBalance.length > 0 && selectedAccountIds.length === accountsWithBalance.length;
+
+                return (
                 <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col" style={{ height: '80vh' }}>
                     <div className="p-4 md:p-6 border-b border-gray-100 flex flex-col md:flex-row justify-between items-start md:items-center bg-gray-50 flex-shrink-0 gap-4">
                         <div><h2 className="text-xl font-bold text-gray-800">账目管理</h2><p className="text-sm text-gray-500 mt-1">资金进出明细</p></div>
@@ -1524,6 +1605,9 @@
                         <table className="w-full text-left text-sm relative border-collapse min-w-[800px]">
                             <thead className="bg-gray-100 text-gray-600 font-medium sticky top-0 z-20 shadow-sm">
                                 <tr>
+                                <th className="p-4 bg-gray-100 w-12 text-center cursor-pointer select-none" onClick={handleSelectAllAccounts}>
+                                    {isAllSelected ? (Icons.CheckSquare && <Icons.CheckSquare className="mx-auto text-emerald-500" size={18}/>) : (Icons.Square && <Icons.Square className="mx-auto text-gray-400" size={18}/>)}
+                                </th>
                                 <th className="p-4 whitespace-nowrap bg-gray-100 w-32"><div className="flex items-center gap-2">日期</div></th>
                                 <th className="p-4 whitespace-nowrap bg-gray-100">项目</th>
                                 <th className="p-4 text-right whitespace-nowrap bg-gray-100">支出</th>
@@ -1533,12 +1617,17 @@
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-100">
-                                {accountsWithBalance.map((item) => (
+                                {accountsWithBalance.map((item) => {
+                                const isSelected = selectedAccountIds.includes(item.id);
+                                return (
                                 <tr 
                                     key={item.id} 
-                                    onClick={() => openAccountModal(item)} 
-                                    className="hover:bg-gray-50 transition-colors group cursor-pointer"
+                                    onClick={() => handleToggleSelectAccount(item.id)}
+                                    className={`hover:bg-gray-50 transition-colors group cursor-pointer ${isSelected ? 'bg-emerald-50' : ''}`}
                                 >
+                                    <td className="p-4 text-center">
+                                        {isSelected ? (Icons.CheckSquare && <Icons.CheckSquare className="mx-auto text-emerald-500" size={18}/>) : (Icons.Square && <Icons.Square className="mx-auto text-gray-300" size={18}/>)}
+                                    </td>
                                     <td className="p-4 text-gray-600 font-mono whitespace-nowrap">
                                     <div className="flex items-center gap-2">
                                         {formatDateShort(item.date)}
@@ -1548,6 +1637,12 @@
                                         >
                                         {Icons.Trash2 && <Icons.Trash2 size={14}/>}
                                         </button>
+                                        <button 
+                                        onClick={(e) => { e.stopPropagation(); openAccountModal(item); }} 
+                                        className="text-gray-300 hover:text-emerald-500 p-1 rounded-full hover:bg-emerald-50 transition-colors ml-1"
+                                        >
+                                        {Icons.Edit2 && <Icons.Edit2 size={14}/>}
+                                        </button>
                                     </div>
                                     </td>
                                     <td className="p-4 font-medium text-gray-800 whitespace-nowrap">{item.project}</td>
@@ -1556,12 +1651,24 @@
                                     <td className="p-4 text-right font-bold text-gray-800 whitespace-nowrap">{item.balance.toLocaleString()}</td>
                                     <td className="p-4 text-gray-500 text-xs max-w-xs truncate" title={item.remark}>{item.remark}</td>
                                 </tr>
-                                ))}
+                                )})}
                             </tbody>
                         </table>
                     </div>
+
+                    {selectedAccountIds.length > 0 && (
+                        <div className="fixed bottom-24 md:bottom-6 left-1/2 transform -translate-x-1/2 bg-white border border-gray-200 text-gray-800 px-6 py-4 rounded-xl shadow-2xl flex items-center space-x-6 z-50 animate-in slide-in-from-bottom-10 fade-in duration-300 min-w-[300px]">
+                            <div className="flex items-center"><div className="bg-emerald-100 text-emerald-700 font-bold px-2 py-1 rounded text-xs mr-2">{selectedAccountIds.length}</div><span className="font-bold text-sm">项已选</span></div>
+                            <div className="h-8 w-px bg-gray-200"></div>
+                            <div className="flex space-x-2">
+                                <button onClick={handleBatchDeleteAccounts} className="bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-lg flex items-center">{Icons.Trash2 && <Icons.Trash2 size={14} className="mr-2"/>} 批量删除</button>
+                            </div>
+                            <button onClick={() => setSelectedAccountIds([])} className="ml-auto text-gray-400 hover:text-gray-600 p-1 rounded-full">{Icons.X && <Icons.X size={18}/>}</button>
+                        </div>
+                    )}
                 </div>
-            );
+                );
+            };
 
             const renderCigars = () => {
                 const cigarStats = cigars.reduce((acc, curr) => {
@@ -1672,7 +1779,11 @@
                         <div className="fixed bottom-24 md:bottom-6 left-1/2 transform -translate-x-1/2 bg-white border border-gray-200 text-gray-800 px-6 py-4 rounded-xl shadow-2xl flex items-center space-x-6 z-50 animate-in slide-in-from-bottom-10 fade-in duration-300 min-w-[300px]">
                             <div className="flex items-center"><div className="bg-amber-100 text-amber-700 font-bold px-2 py-1 rounded text-xs mr-2">{selectedCigarIds.length}</div><span className="font-bold text-sm">项已选</span></div>
                             <div className="h-8 w-px bg-gray-200"></div>
-                            <div className="flex space-x-2"><button onClick={openBatchCigarModal} className="bg-gray-900 hover:bg-black text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-lg flex items-center">{Icons.Edit2 && <Icons.Edit2 size={14} className="mr-2"/>} 批量修改</button></div>
+                            <div className="flex space-x-2">
+                                <button onClick={openBatchCigarModal} className="bg-gray-900 hover:bg-black text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-lg flex items-center">{Icons.Edit2 && <Icons.Edit2 size={14} className="mr-2"/>} 批量修改</button>
+                                {/* NEW BUTTON */}
+                                <button onClick={handleBatchDeleteCigar} className="bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-lg flex items-center">{Icons.Trash2 && <Icons.Trash2 size={14} className="mr-2"/>} 批量删除</button>
+                            </div>
                             <button onClick={() => setSelectedCigarIds([])} className="ml-auto text-gray-400 hover:text-gray-600 p-1 rounded-full">{Icons.X && <Icons.X size={18}/>}</button>
                         </div>
                     )}
@@ -1712,14 +1823,23 @@
                 </Modal>
             );
 
-            const renderLoans = () => (
+            const renderLoans = () => {
+                const isAllSelected = sortedLoans.length > 0 && selectedLoanIds.length === sortedLoans.length;
+
+                return (
                 <div className="flex flex-col h-[80vh] relative">
                     <div className="flex-1 overflow-y-auto space-y-6 pb-24 pr-1 no-scrollbar">
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 bg-blue-900 rounded-xl p-6 text-white shadow-lg">
+                    {/* 将 grid-cols-4 改为 grid-cols-5 容纳新数据，并在移动端使最后一项横跨两列 */}
+                    <div className="grid grid-cols-2 md:grid-cols-5 gap-4 bg-blue-900 rounded-xl p-6 text-white shadow-lg">
                         <div><p className="text-blue-200 text-xs font-bold uppercase mb-1">在外本金总额</p><h3 className="text-2xl md:text-3xl font-bold">¥{loanStats.totalPrincipal.toLocaleString()}</h3></div>
                         <div><p className="text-blue-200 text-xs font-bold uppercase mb-1">累计净利润</p><h3 className={`text-2xl md:text-3xl font-bold ${loanStats.totalNetProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>¥{Math.round(loanStats.totalNetProfit).toLocaleString()}</h3></div>
                         <div><p className="text-blue-200 text-xs font-bold uppercase mb-1">当前逾期人数</p><h3 className="text-2xl md:text-3xl font-bold text-rose-400">{loanStats.overdueCount} <span className="text-sm font-normal text-blue-200">人</span></h3></div>
-                        <div className="flex flex-col justify-between items-start md:items-end">
+                        
+                        {/* 新增：当前欠付总额卡片 */}
+                        <div><p className="text-blue-200 text-xs font-bold uppercase mb-1">当前欠付利息</p><h3 className="text-2xl md:text-3xl font-bold text-rose-400">¥{loanStats.totalOverdueAmount.toLocaleString()}</h3></div>
+
+                        {/* 修改：增加 col-span-2 md:col-span-1 适配移动端排版 */}
+                        <div className="flex flex-col justify-between items-start md:items-end col-span-2 md:col-span-1">
                             <div className="flex gap-2 w-full md:w-auto">
                                 <label className="bg-white/10 hover:bg-white/20 border border-white/20 text-white px-3 py-2 rounded-lg flex items-center transition-all text-xs cursor-pointer">
                                     {Icons.Upload && <Icons.Upload size={14} className="mr-2"/>} 导入备份 (含流水)
@@ -1729,7 +1849,15 @@
                                     {Icons.Download && <Icons.Download size={14} className="mr-2"/>} 导出备份 (含流水)
                                 </button>
                             </div>
-                            <button onClick={() => openLoanModal()} className="bg-white/10 hover:bg-white/20 border border-white/20 text-white px-4 py-2 rounded-lg flex items-center transition-all mt-2 text-sm w-full md:w-auto justify-center">{Icons.Plus && <Icons.Plus className="w-4 h-4 mr-2" />} 新增借贷</button><div className="flex items-center text-xs text-blue-200 mt-1"><input type="checkbox" id="showCompleted" checked={showCompletedLoans} onChange={e => setShowCompletedLoans(e.target.checked)} className="mr-2 rounded border-blue-400" /><label htmlFor="showCompleted" className="cursor-pointer select-none">显示已结清</label></div></div>
+                            <button onClick={() => openLoanModal()} className="bg-white/10 hover:bg-white/20 border border-white/20 text-white px-4 py-2 rounded-lg flex items-center transition-all mt-2 text-sm w-full md:w-auto justify-center">{Icons.Plus && <Icons.Plus className="w-4 h-4 mr-2" />} 新增借贷</button>
+                            
+                            <div className="flex items-center gap-4 mt-2">
+                                <div onClick={handleSelectAllLoans} className="flex items-center cursor-pointer text-blue-200 hover:text-white text-xs select-none">
+                                    {isAllSelected ? (Icons.CheckSquare && <Icons.CheckSquare className="mr-1 text-emerald-400" size={14}/>) : (Icons.Square && <Icons.Square className="mr-1" size={14}/>)} 全选
+                                </div>
+                                <div className="flex items-center text-xs text-blue-200"><input type="checkbox" id="showCompleted" checked={showCompletedLoans} onChange={e => setShowCompletedLoans(e.target.checked)} className="mr-2 rounded border-blue-400" /><label htmlFor="showCompleted" className="cursor-pointer select-none">显示已结清</label></div>
+                            </div>
+                        </div>
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -1737,35 +1865,60 @@
                         const isCompleted = loan.status === 'completed';
                         const financials = calculateFinancials(loan);
                         const overdueStats = calculateOverdueStats(loan);
+                        const isSelected = selectedLoanIds.includes(loan.id);
                         
                         return (
-                            <div key={loan.id} className={`bg-white rounded-xl shadow-sm border ${isCompleted ? 'border-gray-200 opacity-70' : overdueStats.overduePeriods > 0 ? 'border-rose-200' : 'border-gray-100'} p-6 relative overflow-hidden group hover:shadow-md transition-all`}>
+                            <div 
+                                key={loan.id} 
+                                onClick={() => handleToggleSelectLoan(loan.id)}
+                                className={`bg-white rounded-xl shadow-sm border ${isCompleted ? 'border-gray-200 opacity-70' : overdueStats.overduePeriods > 0 ? 'border-rose-200' : 'border-gray-100'} ${isSelected ? 'ring-2 ring-emerald-400 border-emerald-400' : ''} p-6 relative overflow-hidden group hover:shadow-md transition-all cursor-pointer`}
+                            >
                             <div className={`absolute top-0 left-0 w-1 h-full ${isCompleted ? 'bg-gray-400' : overdueStats.overduePeriods > 0 ? 'bg-rose-500' : 'bg-blue-500'}`}></div>
+                            
+                            {/* Checkbox Icon */}
+                            <div className="absolute top-6 left-2 z-10 text-gray-300">
+                                {isSelected ? (Icons.CheckSquare && <Icons.CheckSquare className="text-emerald-500" size={20}/>) : (Icons.Square && <Icons.Square size={20}/>)}
+                            </div>
+
                             {isCompleted && <div className="absolute top-2 right-2 flex gap-1 z-10"><button onClick={(e) => { e.stopPropagation(); handleDeleteLoan(loan.id); }} className="text-gray-400 hover:text-rose-500 p-1 rounded-full">{Icons.Trash2 && <Icons.Trash2 size={16}/>}</button><span className="bg-gray-100 text-gray-500 text-xs px-2 py-1 rounded-full font-bold flex items-center">已结清</span></div>}
                             
-                            <div className="flex justify-between items-start mb-2">
-                                <div><h3 className="text-lg font-bold text-gray-800 flex items-center">{loan.borrower}<span className="ml-2 text-xs font-normal text-gray-400 px-2 py-0.5 bg-gray-100 rounded">{loan.interestRate}</span></h3>{loan.guarantor && <p className="text-xs text-gray-500 mt-1">担保人: <span className="font-medium text-gray-700">{loan.guarantor}</span></p>}</div>
-                                {!isCompleted && <div className="flex gap-2 relative z-10"><button onClick={(e) => { e.stopPropagation(); handleDeleteLoan(loan.id); }} className="p-1.5 hover:bg-rose-50 rounded text-gray-400 hover:text-rose-600 transition-colors">{Icons.Trash2 && <Icons.Trash2 size={16}/>}</button><button onClick={() => openLoanModal(loan)} className="p-1.5 hover:bg-gray-100 rounded text-gray-400 hover:text-indigo-600 transition-colors">{Icons.Edit2 && <Icons.Edit2 size={16}/>}</button></div>}
+                            <div className="pl-6"> {/* Content Wrapper with padding for checkbox */}
+                                <div className="flex justify-between items-start mb-2">
+                                    <div><h3 className="text-lg font-bold text-gray-800 flex items-center">{loan.borrower}<span className="ml-2 text-xs font-normal text-gray-400 px-2 py-0.5 bg-gray-100 rounded">{loan.interestRate}</span></h3>{loan.guarantor && <p className="text-xs text-gray-500 mt-1">担保人: <span className="font-medium text-gray-700">{loan.guarantor}</span></p>}</div>
+                                    {!isCompleted && <div className="flex gap-2 relative z-10"><button onClick={(e) => { e.stopPropagation(); handleDeleteLoan(loan.id); }} className="p-1.5 hover:bg-rose-50 rounded text-gray-400 hover:text-rose-600 transition-colors">{Icons.Trash2 && <Icons.Trash2 size={16}/>}</button><button onClick={(e) => { e.stopPropagation(); openLoanModal(loan); }} className="p-1.5 hover:bg-gray-100 rounded text-gray-400 hover:text-indigo-600 transition-colors">{Icons.Edit2 && <Icons.Edit2 size={16}/>}</button></div>}
+                                </div>
+                                
+                                <div className="bg-gray-50 rounded-lg p-3 mb-4 space-y-2">
+                                    <div className="flex justify-between items-center text-sm"><span className="text-gray-500">剩余本金</span><span className={`font-bold text-lg ${isCompleted ? 'text-gray-400 strike-through' : 'text-gray-800'}`}>¥{Number(loan.totalPrincipal).toLocaleString()}</span></div>
+                                    {!isCompleted && overdueStats.overduePeriods > 0 && (<div className="bg-rose-50 border border-rose-100 p-2 rounded mt-2"><div className="flex justify-between text-rose-700 text-xs font-bold mb-1"><span>逾期期数</span><span>{overdueStats.overduePeriods} 期</span></div><div className="flex justify-between text-rose-600 text-xs"><span>欠付利息</span><span>¥{overdueStats.overdueAmount.toLocaleString()}</span></div></div>)}
+                                    {!isCompleted && overdueStats.overduePeriods === 0 && (<div className="flex justify-between items-center text-sm pt-2 border-t border-gray-200"><span className="text-gray-500">下次付息</span><span className="font-bold text-emerald-600 flex items-center">{loan.nextPayDate}</span></div>)}
+                                </div>
+                                <div className="space-y-1 mb-4 text-xs">
+                                    <div className="flex justify-between items-center bg-gray-50 px-2 py-1.5 rounded"><span className="text-gray-500">已收利息</span><span className="font-medium text-gray-700">¥{financials.totalInterestCollected.toLocaleString()}</span></div>
+                                    <div className="flex justify-between items-center bg-indigo-50 px-2 py-1.5 rounded"><span className="text-indigo-600">资金成本 ({loan.costRate || '0%'})</span><span className="font-medium text-indigo-700">- ¥{Math.round(financials.cumulativeCost).toLocaleString()}</span></div>
+                                    <div className="flex justify-between items-center px-2 py-1.5 border-t border-gray-100 mt-1"><span className="font-bold text-gray-600">净收益</span><span className={`font-bold ${financials.netProfit >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>¥{Math.round(financials.netProfit).toLocaleString()}</span></div>
+                                </div>
+                                <button onClick={(e) => { e.stopPropagation(); setActiveLoanDetail(loan); }} className="w-full bg-white border border-gray-200 hover:bg-blue-50 hover:border-blue-200 hover:text-blue-700 text-gray-600 py-2.5 rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-2">{Icons.FileText && <Icons.FileText size={16}/>} 查看详情 / 资金操作</button>
                             </div>
-                            
-                            <div className="bg-gray-50 rounded-lg p-3 mb-4 space-y-2">
-                                <div className="flex justify-between items-center text-sm"><span className="text-gray-500">剩余本金</span><span className={`font-bold text-lg ${isCompleted ? 'text-gray-400 strike-through' : 'text-gray-800'}`}>¥{Number(loan.totalPrincipal).toLocaleString()}</span></div>
-                                {!isCompleted && overdueStats.overduePeriods > 0 && (<div className="bg-rose-50 border border-rose-100 p-2 rounded mt-2"><div className="flex justify-between text-rose-700 text-xs font-bold mb-1"><span>逾期期数</span><span>{overdueStats.overduePeriods} 期</span></div><div className="flex justify-between text-rose-600 text-xs"><span>欠付利息</span><span>¥{overdueStats.overdueAmount.toLocaleString()}</span></div></div>)}
-                                {!isCompleted && overdueStats.overduePeriods === 0 && (<div className="flex justify-between items-center text-sm pt-2 border-t border-gray-200"><span className="text-gray-500">下次付息</span><span className="font-bold text-emerald-600 flex items-center">{loan.nextPayDate}</span></div>)}
-                            </div>
-                            <div className="space-y-1 mb-4 text-xs">
-                                <div className="flex justify-between items-center bg-gray-50 px-2 py-1.5 rounded"><span className="text-gray-500">已收利息</span><span className="font-medium text-gray-700">¥{financials.totalInterestCollected.toLocaleString()}</span></div>
-                                <div className="flex justify-between items-center bg-indigo-50 px-2 py-1.5 rounded"><span className="text-indigo-600">资金成本 ({loan.costRate || '0%'})</span><span className="font-medium text-indigo-700">- ¥{Math.round(financials.cumulativeCost).toLocaleString()}</span></div>
-                                <div className="flex justify-between items-center px-2 py-1.5 border-t border-gray-100 mt-1"><span className="font-bold text-gray-600">净收益</span><span className={`font-bold ${financials.netProfit >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>¥{Math.round(financials.netProfit).toLocaleString()}</span></div>
-                            </div>
-                            <button onClick={() => setActiveLoanDetail(loan)} className="w-full bg-white border border-gray-200 hover:bg-blue-50 hover:border-blue-200 hover:text-blue-700 text-gray-600 py-2.5 rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-2">{Icons.FileText && <Icons.FileText size={16}/>} 查看详情 / 资金操作</button>
                             </div>
                         );
                         })}
                     </div>
                     </div>
+
+                    {selectedLoanIds.length > 0 && (
+                        <div className="fixed bottom-24 md:bottom-6 left-1/2 transform -translate-x-1/2 bg-white border border-gray-200 text-gray-800 px-6 py-4 rounded-xl shadow-2xl flex items-center space-x-6 z-50 animate-in slide-in-from-bottom-10 fade-in duration-300 min-w-[300px]">
+                            <div className="flex items-center"><div className="bg-amber-100 text-amber-700 font-bold px-2 py-1 rounded text-xs mr-2">{selectedLoanIds.length}</div><span className="font-bold text-sm">项已选</span></div>
+                            <div className="h-8 w-px bg-gray-200"></div>
+                            <div className="flex space-x-2">
+                                <button onClick={handleBatchDeleteLoan} className="bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-lg flex items-center">{Icons.Trash2 && <Icons.Trash2 size={14} className="mr-2"/>} 批量删除</button>
+                            </div>
+                            <button onClick={() => setSelectedLoanIds([])} className="ml-auto text-gray-400 hover:text-gray-600 p-1 rounded-full">{Icons.X && <Icons.X size={18}/>}</button>
+                        </div>
+                    )}
                 </div>
             );
+            };
 
             return (
                 <div className="min-h-screen bg-gray-50 flex font-sans text-gray-900 overflow-hidden flex-col md:flex-row">
